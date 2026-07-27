@@ -134,8 +134,6 @@ fun AsciiPreviewScreen() {
         }
         
         // Tab Selection
-        // Temporarily commented out - only showing Video File tab for testing
-        /*
         TabRow(selectedTabIndex = selectedTab) {
             Tab(
                 selected = selectedTab == 0,
@@ -148,7 +146,6 @@ fun AsciiPreviewScreen() {
                 text = { Text("Video File") }
             )
         }
-        */
         
         // Content Area (switches based on selected tab)
         Column(
@@ -157,8 +154,6 @@ fun AsciiPreviewScreen() {
                 .weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            // Temporarily showing only Video File tab for testing
-            /*
             when (selectedTab) {
                 0 -> {
                     // Camera tab
@@ -190,7 +185,6 @@ fun AsciiPreviewScreen() {
                 }
                 
                 1 -> {
-            */
                     // Video file tab
                     VideoFileTabContent(
                         scaleFactor = scaleFactor,
@@ -199,10 +193,8 @@ fun AsciiPreviewScreen() {
                         displayMode = displayMode,
                         modifier = Modifier.weight(1f)
                     )
-            /*
                 }
             }
-            */
         }
     }
 }
