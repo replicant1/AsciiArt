@@ -137,7 +137,7 @@ fun AsciiPreviewScreen() {
                     contrastFactor = contrastFactor,
                     colorEnabled = colorEnabled,
                     displayMode = displayMode,
-                    onFrameProcessed = { bitmap, asciiText, asciiColors, _, _ ->
+                    onFrameProcessed = { bitmap, asciiText, asciiColors ->
                         liveBitmap = bitmap
                         liveAsciiText = asciiText
                         liveAsciiColors = asciiColors
@@ -254,7 +254,7 @@ private fun CameraAnalysisPipeline(
     contrastFactor: Float,
     colorEnabled: Boolean,
     displayMode: AsciiDisplayMode,
-    onFrameProcessed: (Bitmap, String, IntArray?, Double, Double) -> Unit
+    onFrameProcessed: (Bitmap, String, IntArray?) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current

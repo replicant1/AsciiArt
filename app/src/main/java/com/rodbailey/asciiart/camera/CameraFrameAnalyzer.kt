@@ -19,17 +19,13 @@ class CameraFrameAnalyzer(
     private val onFrameProcessed: (
         bitmap: Bitmap,
         asciiText: String,
-        asciiColors: IntArray?,
-        processingMs: Double,
-        estimatedFps: Double
+        asciiColors: IntArray?
     ) -> Unit
 ) : ImageAnalysis.Analyzer {
 
     private val mainThreadHandler = Handler(Looper.getMainLooper())
-    private var lastFrameTimestampNs = 0L
 
     override fun analyze(image: ImageProxy) {
-        val frameStartNs = System.nanoTime()
         val rotationDegrees = image.imageInfo.rotationDegrees
         val colorEnabled = colorEnabledProvider()
         val frameResult = ImageProcessor.processLumaFrame(
@@ -65,17 +61,8 @@ class CameraFrameAnalyzer(
             orientedBitmap
         }
 
-        val frameEndNs = System.nanoTime()
-        val processingMs = (frameEndNs - frameStartNs) / 1_000_000.0
-        val estimatedFps = if (lastFrameTimestampNs == 0L) {
-            0.0
-        } else {
-            1_000_000_000.0 / (frameEndNs - lastFrameTimestampNs).coerceAtLeast(1L)
-        }
-        lastFrameTimestampNs = frameEndNs
-
         mainThreadHandler.post {
-            onFrameProcessed(displayBitmap, asciiText, orientedAsciiColors, processingMs, estimatedFps)
+            onFrameProcessed(displayBitmap, asciiText, orientedAsciiColors)
         }
     }
 
