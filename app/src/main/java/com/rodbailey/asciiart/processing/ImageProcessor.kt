@@ -76,6 +76,51 @@ object ImageProcessor {
         )
     }
 
+    fun processBitmap(
+        bitmap: Bitmap,
+        contrastFactor: Float,
+        colorEnabled: Boolean
+    ): FrameProcessingResult {
+        val contrast = contrastFactor.coerceIn(0.2f, 2.0f)
+        val width = bitmap.width
+        val height = bitmap.height
+
+        val pixels = IntArray(width * height)
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+
+        val outputPixels = IntArray(width * height)
+        val colorPixels = if (colorEnabled) IntArray(width * height) else null
+
+        for (i in pixels.indices) {
+            val argb = pixels[i]
+            val r = (argb shr 16) and 0xFF
+            val g = (argb shr 8) and 0xFF
+            val b = argb and 0xFF
+            
+            // Convert RGB to grayscale (luminance)
+            val gray = (0.299f * r + 0.587f * g + 0.114f * b).toInt()
+            val contrastedGray = (((gray - 128f) * contrast) + 128f).coerceIn(0f, 255f)
+            val adjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
+
+            outputPixels[i] = (0xFF shl 24) or
+                (adjustedGray shl 16) or
+                (adjustedGray shl 8) or
+                adjustedGray
+
+            if (colorEnabled) {
+                colorPixels?.set(i, argb)
+            }
+        }
+
+        val grayscaleBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+            setPixels(outputPixels, 0, width, 0, 0, width, height)
+        }
+        return FrameProcessingResult(
+            grayscaleBitmap = grayscaleBitmap,
+            asciiColors = colorPixels
+        )
+    }
+
     private fun yuvToArgb(yValue: Int, uValue: Int, vValue: Int): Int {
         val c = (yValue - 16).coerceAtLeast(0)
         val d = uValue - 128

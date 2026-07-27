@@ -1,6 +1,5 @@
 package com.rodbailey.asciiart.ui
 
-import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Log
@@ -27,11 +26,12 @@ import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.ui.StyledPlayerView
 import com.rodbailey.asciiart.processing.AsciiDisplayMode
+import com.rodbailey.asciiart.processing.ExoPlayerFrameCapture
 
 private const val TAG = "VideoFilePlayer"
 
 // Path to test video file in app assets
-private const val TEST_VIDEO_PATH = "/data/local/tmp/blue_eyes.mp4"
+private const val TEST_VIDEO_PATH = "file:///data/local/tmp/blue_eyes.mp4"
 
 @Composable
 fun ExoPlayerVideoFileTab(
@@ -43,6 +43,7 @@ fun ExoPlayerVideoFileTab(
 ) {
     val context = LocalContext.current
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
+    var frameCapture by remember { mutableStateOf<ExoPlayerFrameCapture?>(null) }
     var videoBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var asciiText by remember { mutableStateOf("") }
     var asciiColors by remember { mutableStateOf<IntArray?>(null) }
@@ -54,17 +55,38 @@ fun ExoPlayerVideoFileTab(
         exoPlayer = player
 
         // Try to load test video file
-        val videoUri = Uri.parse("file://$TEST_VIDEO_PATH")
-        val mediaItem = MediaItem.fromUri(videoUri)
+        val mediaItem = MediaItem.fromUri(Uri.parse(TEST_VIDEO_PATH))
         player.setMediaItem(mediaItem)
         player.prepare()
+
+        // Create frame capture
+        val capture = ExoPlayerFrameCapture(
+            exoPlayer = player,
+            videoUri = TEST_VIDEO_PATH.removePrefix("file://"),
+            scaleFactorProvider = { scaleFactor },
+            contrastFactorProvider = { contrastFactor },
+            colorEnabledProvider = { colorEnabled },
+            displayModeProvider = { displayMode },
+            captureInterval = 100,  // Capture every 100ms
+            onFrameProcessed = { bitmap, ascii, colors ->
+                videoBitmap = bitmap
+                asciiText = ascii
+                asciiColors = colors
+                frameCount++
+            }
+        )
+        frameCapture = capture
+
         player.play()
+        capture.startCapture()
 
         Log.d(TAG, "ExoPlayer initialized with video: $TEST_VIDEO_PATH")
 
         onDispose {
+            capture.release()
             player.release()
             exoPlayer = null
+            frameCapture = null
         }
     }
 
