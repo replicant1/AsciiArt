@@ -349,14 +349,19 @@ private fun VideoPlaybackPipeline(
 
     DisposableEffect(Unit) {
         val executor = Executors.newSingleThreadExecutor()
+        var frameCount = 0
         val frameProcessingJob = Executors.newScheduledThreadPool(1).scheduleAtFixedRate(
             {
                 val frame = videoProcessor.getNextFrame()
                 if (frame != null) {
-                    val videoRotation = videoProcessor.getVideoRotation()
-                    val rotation = if (videoRotation == 0) 90 else 0  // Rotate landscape videos
-                    frameAnalyzer.processFrame(frame, rotation)
+                    // Only process every 100th frame to improve performance
+                    if (frameCount % 100 == 0) {
+                        val videoRotation = videoProcessor.getVideoRotation()
+                        val rotation = if (videoRotation == 0) 90 else 0  // Rotate landscape videos
+                        frameAnalyzer.processFrame(frame, rotation)
+                    }
                     frame.recycle()
+                    frameCount++
                     
                     // Update playback time
                     val currentFrameIndex = videoProcessor.getCurrentFrameIndex()
