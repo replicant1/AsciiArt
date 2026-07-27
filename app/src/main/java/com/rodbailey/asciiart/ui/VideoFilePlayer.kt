@@ -14,7 +14,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -26,12 +25,12 @@ import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.ui.StyledPlayerView
 import com.rodbailey.asciiart.processing.AsciiDisplayMode
-import com.rodbailey.asciiart.processing.ExoPlayerFrameCapture
+import com.rodbailey.asciiart.processing.ExoPlayerFrameListener
 
 private const val TAG = "VideoFilePlayer"
 
-// Path to test video file in app assets
-private const val TEST_VIDEO_PATH = "file:///data/local/tmp/blue_eyes.mp4"
+// Path to test video file on device
+private const val TEST_VIDEO_PATH = "file:///sdcard/Downloads/blue-eyes.mp4"
 
 @Composable
 fun ExoPlayerVideoFileTab(
@@ -43,31 +42,31 @@ fun ExoPlayerVideoFileTab(
 ) {
     val context = LocalContext.current
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
-    var frameCapture by remember { mutableStateOf<ExoPlayerFrameCapture?>(null) }
+    var frameListener by remember { mutableStateOf<ExoPlayerFrameListener?>(null) }
     var videoBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var asciiText by remember { mutableStateOf("") }
     var asciiColors by remember { mutableStateOf<IntArray?>(null) }
     var showVideo by remember { mutableStateOf(true) }
-    var frameCount by remember { mutableIntStateOf(0) }
+    var frameCount by remember { mutableStateOf(0) }
 
     DisposableEffect(Unit) {
         val player = ExoPlayer.Builder(context).build()
         exoPlayer = player
 
-        // Try to load test video file
+        // Load test video file
         val mediaItem = MediaItem.fromUri(Uri.parse(TEST_VIDEO_PATH))
         player.setMediaItem(mediaItem)
         player.prepare()
 
-        // Create frame capture
-        val capture = ExoPlayerFrameCapture(
+        // Create and start frame listener
+        val listener = ExoPlayerFrameListener(
             exoPlayer = player,
             videoUri = TEST_VIDEO_PATH.removePrefix("file://"),
             scaleFactorProvider = { scaleFactor },
             contrastFactorProvider = { contrastFactor },
             colorEnabledProvider = { colorEnabled },
             displayModeProvider = { displayMode },
-            captureInterval = 100,  // Capture every 100ms
+            frameSkipRate = 2,  // Process every 2nd rendered frame
             onFrameProcessed = { bitmap, ascii, colors ->
                 videoBitmap = bitmap
                 asciiText = ascii
@@ -75,23 +74,23 @@ fun ExoPlayerVideoFileTab(
                 frameCount++
             }
         )
-        frameCapture = capture
+        frameListener = listener
+        listener.startListening()
 
         player.play()
-        capture.startCapture()
 
         Log.d(TAG, "ExoPlayer initialized with video: $TEST_VIDEO_PATH")
 
         onDispose {
-            capture.release()
+            listener.release()
             player.release()
             exoPlayer = null
-            frameCapture = null
+            frameListener = null
         }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // Player toggle buttons
+        // Toggle button
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -105,14 +104,16 @@ fun ExoPlayerVideoFileTab(
             }
         }
 
-        // Display content based on toggle
+        // Display content
         if (showVideo) {
-            // Video display
+            // Video display (ExoPlayer handles rendering)
             exoPlayer?.let {
                 AndroidView(
                     factory = { context ->
                         StyledPlayerView(context).apply {
                             player = it
+                            useController = true
+                            controllerShowTimeoutMs = 5000
                         }
                     },
                     modifier = Modifier
@@ -156,7 +157,7 @@ fun ExoPlayerVideoFileTab(
             }
         }
 
-        // Playback info
+        // Frame counter
         Box(
             modifier = Modifier
                 .fillMaxWidth()
