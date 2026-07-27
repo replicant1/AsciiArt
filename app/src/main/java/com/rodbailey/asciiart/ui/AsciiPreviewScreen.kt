@@ -69,6 +69,14 @@ import kotlin.math.roundToInt
 
 private const val TAG = "AsciiPreviewScreen"
 
+private fun formatPlaybackTime(timeMs: Long): String {
+    val totalSeconds = timeMs / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    val milliseconds = timeMs % 1000
+    return String.format("%d:%02d.%03d", minutes, seconds, milliseconds)
+}
+
 @Composable
 fun AsciiPreviewScreen() {
     var scaleFactor by remember { mutableIntStateOf(8) }
@@ -81,6 +89,8 @@ fun AsciiPreviewScreen() {
     
     var useVideo by remember { mutableStateOf(false) }
     var videoUri by remember { mutableStateOf<Uri?>(null) }
+    var videoPlaybackTimeMs by remember { mutableStateOf(0L) }
+    var videoTotalDurationMs by remember { mutableStateOf(0L) }
 
     val context = LocalContext.current
     var hasCameraPermission by remember {
@@ -126,6 +136,16 @@ fun AsciiPreviewScreen() {
         }
         videoFileLauncher.launch(intent)
     }
+    
+    val stopVideo = {
+        useVideo = false
+        videoUri = null
+        videoPlaybackTimeMs = 0L
+        videoTotalDurationMs = 0L
+        liveBitmap = null
+        liveAsciiText = ""
+        liveAsciiColors = null
+    }
 
     Column(
         modifier = Modifier
@@ -139,11 +159,22 @@ fun AsciiPreviewScreen() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(stringResource(R.string.app_title), style = MaterialTheme.typography.titleLarge)
-            Button(
-                onClick = { openVideoFilePicker() },
-                modifier = Modifier.padding(end = 8.dp)
-            ) {
-                Text(stringResource(R.string.ascii_preview_load_video_button))
+            if (useVideo) {
+                val currentMinSec = formatPlaybackTime(videoPlaybackTimeMs)
+                val totalMinSec = formatPlaybackTime(videoTotalDurationMs)
+                Button(
+                    onClick = { stopVideo() },
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    Text("Stop [$currentMinSec / $totalMinSec]")
+                }
+            } else {
+                Button(
+                    onClick = { openVideoFilePicker() },
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    Text(stringResource(R.string.ascii_preview_load_video_button))
+                }
             }
         }
         
@@ -183,6 +214,10 @@ fun AsciiPreviewScreen() {
                         liveBitmap = bitmap
                         liveAsciiText = asciiText
                         liveAsciiColors = asciiColors
+                    },
+                    onPlaybackTimeUpdate = { currentMs, totalMs ->
+                        videoPlaybackTimeMs = currentMs
+                        videoTotalDurationMs = totalMs
                     },
                     onLoadFailed = {
                         useVideo = false
@@ -279,6 +314,7 @@ private fun VideoPlaybackPipeline(
     colorEnabled: Boolean,
     displayMode: AsciiDisplayMode,
     onFrameProcessed: (Bitmap, String, IntArray?) -> Unit,
+    onPlaybackTimeUpdate: (Long, Long) -> Unit,
     onLoadFailed: () -> Unit
 ) {
     val context = LocalContext.current
@@ -287,6 +323,7 @@ private fun VideoPlaybackPipeline(
     val currentColorEnabled by rememberUpdatedState(colorEnabled)
     val currentDisplayMode by rememberUpdatedState(displayMode)
     val currentFrameCallback by rememberUpdatedState(onFrameProcessed)
+    val currentPlaybackTimeCallback by rememberUpdatedState(onPlaybackTimeUpdate)
 
     val videoProcessor = remember(videoUri) {
         VideoProcessor(context)
@@ -320,6 +357,16 @@ private fun VideoPlaybackPipeline(
                     val rotation = if (videoRotation == 0) 90 else 0  // Rotate landscape videos
                     frameAnalyzer.processFrame(frame, rotation)
                     frame.recycle()
+                    
+                    // Update playback time
+                    val currentFrameIndex = videoProcessor.getCurrentFrameIndex()
+                    val totalFrames = videoProcessor.getTotalFrames()
+                    val frameRate = videoProcessor.getFrameRate()
+                    if (frameRate > 0) {
+                        val currentMs = (currentFrameIndex * 1000L) / frameRate
+                        val totalMs = (totalFrames * 1000L) / frameRate
+                        currentPlaybackTimeCallback(currentMs, totalMs)
+                    }
                 }
             },
             0,
