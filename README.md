@@ -47,3 +47,124 @@ Characters are sorted by this density, from sparse (e.g. space) to dense. Graysc
 - App is portrait-locked.
 - Edge-to-edge/system bar transparency is configured.
 - Camera permission is requested at runtime.
+
+## Architecture Diagrams
+
+### Grayscale Mode Sequence
+```mermaid
+sequenceDiagram
+    participant Camera
+    participant CFA as CameraFrameAnalyzer
+    participant IP as ImageProcessor
+    participant AA as AsciiArt
+    participant UI as AsciiPreviewScreen
+
+    Camera->>CFA: ImageProxy (YUV)
+    CFA->>IP: processLumaFrame()
+    IP->>IP: Read Y plane, downsample
+    IP->>IP: Apply contrast adjustment
+    IP->>IP: Create grayscale ARGB bitmap
+    IP-->>CFA: FrameProcessingResult (bitmap, null)
+    CFA->>CFA: Rotate bitmap to device orientation
+    alt ASCII Mode
+        CFA->>AA: toAsciiText(bitmap)
+        AA-->>CFA: ASCII text
+    else Image Mode
+        CFA->>CFA: Use bitmap directly
+    end
+    CFA->>UI: onFrameProcessed(displayBitmap, asciiText, null)
+    UI->>UI: Render to Canvas or Image
+```
+
+### Colour Mode Sequence
+```mermaid
+sequenceDiagram
+    participant Camera
+    participant CFA as CameraFrameAnalyzer
+    participant IP as ImageProcessor
+    participant AA as AsciiArt
+    participant UI as AsciiPreviewScreen
+
+    Camera->>CFA: ImageProxy (YUV)
+    CFA->>IP: processLumaFrame(colorEnabled=true)
+    IP->>IP: Read Y plane, downsample
+    IP->>IP: Apply contrast adjustment
+    IP->>IP: Sample U,V planes for per-cell color
+    IP->>IP: Convert YUV to ARGB for each cell
+    IP->>IP: Create grayscale ARGB bitmap
+    IP-->>CFA: FrameProcessingResult (bitmap, colorGrid)
+    CFA->>CFA: Rotate bitmap to device orientation
+    CFA->>CFA: Rotate color grid to device orientation
+    alt Image Mode + Colour
+        CFA->>CFA: Create colored bitmap from grid
+    else ASCII Mode + Colour
+        CFA->>AA: toAsciiText(bitmap)
+        AA-->>CFA: ASCII text
+    end
+    CFA->>UI: onFrameProcessed(displayBitmap, asciiText, colorGrid)
+    UI->>UI: Render with colors from grid
+```
+
+### Static Class Diagram
+```mermaid
+classDiagram
+    class MainActivity {
+        onCreate()
+        setContent()
+    }
+    
+    class AsciiPreviewScreen {
+        scaleFactor
+        contrastFactor
+        colorEnabled
+        displayMode
+        liveBitmap
+        liveAsciiText
+        liveAsciiColors
+    }
+    
+    class CameraAnalysisPipeline {
+        scaleFactor: Int
+        contrastFactor: Float
+        colorEnabled: Boolean
+        displayMode: AsciiDisplayMode
+    }
+    
+    class CameraFrameAnalyzer {
+        scaleFactorProvider()
+        contrastFactorProvider()
+        colorEnabledProvider()
+        displayModeProvider()
+        onFrameProcessed()
+        analyze(image: ImageProxy)
+    }
+    
+    class ImageProcessor {
+        +processLumaFrame()$
+        -yuvToArgb()$
+    }
+    
+    class FrameProcessingResult {
+        grayscaleBitmap: Bitmap
+        asciiColors: IntArray
+    }
+    
+    class AsciiArt {
+        +toAsciiText()$
+    }
+    
+    class AsciiDisplayMode {
+        <<enum>>
+        IMAGE_ONLY
+        ASCII_ONLY
+    }
+    
+    MainActivity --> AsciiPreviewScreen
+    AsciiPreviewScreen --> CameraAnalysisPipeline
+    CameraAnalysisPipeline --> CameraFrameAnalyzer
+    CameraFrameAnalyzer --> ImageProcessor
+    ImageProcessor --> FrameProcessingResult
+    CameraFrameAnalyzer --> AsciiArt
+    AsciiPreviewScreen --> AsciiDisplayMode
+```
+

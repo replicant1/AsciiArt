@@ -1,0 +1,59 @@
+classDiagram
+    class MainActivity {
+        onCreate()
+        setContent()
+    }
+    
+    class AsciiPreviewScreen {
+        scaleFactor
+        contrastFactor
+        colorEnabled
+        displayMode
+        liveBitmap
+        liveAsciiText
+        liveAsciiColors
+    }
+    
+    class CameraAnalysisPipeline {
+        scaleFactor: Int
+        contrastFactor: Float
+        colorEnabled: Boolean
+        displayMode: AsciiDisplayMode
+    }
+    
+    class CameraFrameAnalyzer {
+        scaleFactorProvider()
+        contrastFactorProvider()
+        colorEnabledProvider()
+        displayModeProvider()
+        onFrameProcessed()
+        analyze(image: ImageProxy)
+    }
+    
+    class ImageProcessor {
+        +processLumaFrame()$
+        -yuvToArgb()$
+    }
+    
+    class FrameProcessingResult {
+        grayscaleBitmap: Bitmap
+        asciiColors: IntArray
+    }
+    
+    class AsciiArt {
+        +toAsciiText()$
+    }
+    
+    class AsciiDisplayMode {
+        <<enum>>
+        IMAGE_ONLY
+        ASCII_ONLY
+    }
+    
+    MainActivity --> AsciiPreviewScreen
+    AsciiPreviewScreen --> CameraAnalysisPipeline
+    CameraAnalysisPipeline --> CameraFrameAnalyzer
+    CameraFrameAnalyzer --> ImageProcessor
+    ImageProcessor --> FrameProcessingResult
+    CameraFrameAnalyzer --> AsciiArt
+    AsciiPreviewScreen --> AsciiDisplayMode

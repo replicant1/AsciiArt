@@ -1,0 +1,25 @@
+sequenceDiagram
+    participant Camera
+    participant CFA as CameraFrameAnalyzer
+    participant IP as ImageProcessor
+    participant AA as AsciiArt
+    participant UI as AsciiPreviewScreen
+
+    Camera->>CFA: ImageProxy (YUV)
+    CFA->>IP: processLumaFrame(colorEnabled=true)
+    IP->>IP: Read Y plane, downsample
+    IP->>IP: Apply contrast adjustment
+    IP->>IP: Sample U,V planes for per-cell color
+    IP->>IP: Convert YUV to ARGB for each cell
+    IP->>IP: Create grayscale ARGB bitmap
+    IP-->>CFA: FrameProcessingResult (bitmap, colorGrid)
+    CFA->>CFA: Rotate bitmap to device orientation
+    CFA->>CFA: Rotate color grid to device orientation
+    alt Image Mode + Colour
+        CFA->>CFA: Create colored bitmap from grid
+    else ASCII Mode + Colour
+        CFA->>AA: toAsciiText(bitmap)
+        AA-->>CFA: ASCII text
+    end
+    CFA->>UI: onFrameProcessed(displayBitmap, asciiText, colorGrid)
+    UI->>UI: Render with colors from grid

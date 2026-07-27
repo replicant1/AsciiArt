@@ -1,0 +1,22 @@
+sequenceDiagram
+    participant Camera
+    participant CFA as CameraFrameAnalyzer
+    participant IP as ImageProcessor
+    participant AA as AsciiArt
+    participant UI as AsciiPreviewScreen
+
+    Camera->>CFA: ImageProxy (YUV)
+    CFA->>IP: processLumaFrame()
+    IP->>IP: Read Y plane, downsample
+    IP->>IP: Apply contrast adjustment
+    IP->>IP: Create grayscale ARGB bitmap
+    IP-->>CFA: FrameProcessingResult (bitmap, null)
+    CFA->>CFA: Rotate bitmap to device orientation
+    alt ASCII Mode
+        CFA->>AA: toAsciiText(bitmap)
+        AA-->>CFA: ASCII text
+    else Image Mode
+        CFA->>CFA: Use bitmap directly
+    end
+    CFA->>UI: onFrameProcessed(displayBitmap, asciiText, null)
+    UI->>UI: Render to Canvas or Image
