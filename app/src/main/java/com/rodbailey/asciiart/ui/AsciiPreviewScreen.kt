@@ -1,10 +1,14 @@
 package com.rodbailey.asciiart.ui
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Paint as AndroidPaint
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.DocumentsContract
 import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -94,12 +98,33 @@ fun AsciiPreviewScreen() {
     }
     
     val videoFileLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            videoUri = uri
-            useVideo = true
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            result.data?.data?.let { uri ->
+                videoUri = uri
+                useVideo = true
+            }
         }
+    }
+    
+    val openVideoFilePicker = {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "video/*"
+            
+            // Set initial directory to Downloads (API 26+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                try {
+                    val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    val uri = Uri.fromFile(downloadsDir)
+                    putExtra(DocumentsContract.EXTRA_INITIAL_URI, uri)
+                } catch (e: Exception) {
+                    Log.d(TAG, "Could not set initial directory: ${e.message}")
+                }
+            }
+        }
+        videoFileLauncher.launch(intent)
     }
 
     Column(
@@ -115,7 +140,7 @@ fun AsciiPreviewScreen() {
         ) {
             Text(stringResource(R.string.app_title), style = MaterialTheme.typography.titleLarge)
             Button(
-                onClick = { videoFileLauncher.launch(arrayOf("video/*")) },
+                onClick = { openVideoFilePicker() },
                 modifier = Modifier.padding(end = 8.dp)
             ) {
                 Text(stringResource(R.string.ascii_preview_load_video_button))
