@@ -344,24 +344,36 @@ private fun VideoPlaybackPipeline(
         if (!loaded) {
             Log.e(TAG, "Failed to load video: $videoUri")
             onLoadFailed()
+        } else {
+            // Process first frame immediately
+            val firstFrame = videoProcessor.getNextFrame()
+            if (firstFrame != null) {
+                val videoRotation = videoProcessor.getVideoRotation()
+                val rotation = if (videoRotation == 0) 90 else 0
+                frameAnalyzer.processFrame(firstFrame, rotation)
+                firstFrame.recycle()
+            }
         }
     }
 
     DisposableEffect(Unit) {
         val executor = Executors.newSingleThreadExecutor()
-        var frameCount = 0
+        // Process frames at a slower rate - every 100ms instead of based on video frame rate
         val frameProcessingJob = Executors.newScheduledThreadPool(1).scheduleAtFixedRate(
             {
+                var framesToSkip = 30  // Skip ~30 frames at 30fps = ~1 frame per second
+                repeat(framesToSkip) {
+                    val frame = videoProcessor.getNextFrame()
+                    frame?.recycle()
+                }
+                
+                // Process the next frame
                 val frame = videoProcessor.getNextFrame()
                 if (frame != null) {
-                    // Only process every 100th frame to improve performance
-                    if (frameCount % 100 == 0) {
-                        val videoRotation = videoProcessor.getVideoRotation()
-                        val rotation = if (videoRotation == 0) 90 else 0  // Rotate landscape videos
-                        frameAnalyzer.processFrame(frame, rotation)
-                    }
+                    val videoRotation = videoProcessor.getVideoRotation()
+                    val rotation = if (videoRotation == 0) 90 else 0
+                    frameAnalyzer.processFrame(frame, rotation)
                     frame.recycle()
-                    frameCount++
                     
                     // Update playback time
                     val currentFrameIndex = videoProcessor.getCurrentFrameIndex()
@@ -374,8 +386,8 @@ private fun VideoPlaybackPipeline(
                     }
                 }
             },
-            0,
-            (1000L / videoProcessor.getFrameRate().coerceAtLeast(1)).coerceAtLeast(16),
+            100,  // Start after 100ms
+            100,  // Repeat every 100ms
             java.util.concurrent.TimeUnit.MILLISECONDS
         )
 
