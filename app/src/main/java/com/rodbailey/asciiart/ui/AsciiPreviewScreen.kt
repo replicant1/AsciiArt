@@ -63,10 +63,11 @@ private const val TAG = "AsciiPreviewScreen"
 fun AsciiPreviewScreen() {
     var scaleFactor by remember { mutableIntStateOf(8) }
     var contrastFactor by remember { mutableFloatStateOf(1.0f) }
-    var invertEnabled by remember { mutableStateOf(false) }
+    var colorEnabled by remember { mutableStateOf(false) }
     var displayMode by remember { mutableStateOf(AsciiDisplayMode.IMAGE_ONLY) }
     var liveBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var liveAsciiText by remember { mutableStateOf("") }
+    var liveAsciiColors by remember { mutableStateOf<IntArray?>(null) }
 
     val context = LocalContext.current
     var hasCameraPermission by remember {
@@ -105,8 +106,8 @@ fun AsciiPreviewScreen() {
         DisplayModeChipBar(
             displayMode = displayMode,
             onDisplayModeChange = { displayMode = it },
-            invertEnabled = invertEnabled,
-            onInvertEnabledChange = { invertEnabled = it },
+            colorEnabled = colorEnabled,
+            onColorEnabledChange = { colorEnabled = it },
             modifier = Modifier.fillMaxWidth()
         )
         Column(
@@ -132,11 +133,12 @@ fun AsciiPreviewScreen() {
                 CameraAnalysisPipeline(
                     scaleFactor = scaleFactor,
                     contrastFactor = contrastFactor,
-                    invertEnabled = invertEnabled,
+                    colorEnabled = colorEnabled,
                     displayMode = displayMode,
-                    onFrameProcessed = { bitmap, asciiText, _, _ ->
+                    onFrameProcessed = { bitmap, asciiText, asciiColors, _, _ ->
                         liveBitmap = bitmap
                         liveAsciiText = asciiText
+                        liveAsciiColors = asciiColors
                     }
                 )
 
@@ -156,6 +158,8 @@ fun AsciiPreviewScreen() {
                             AsciiGridPreview(
                                 bitmap = liveBitmapValue,
                                 asciiText = liveAsciiText,
+                                asciiColors = liveAsciiColors,
+                                colorEnabled = colorEnabled,
                                 drawSourceImage = true,
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -167,6 +171,8 @@ fun AsciiPreviewScreen() {
                             AsciiGridPreview(
                                 bitmap = liveBitmapValue,
                                 asciiText = liveAsciiText,
+                                asciiColors = liveAsciiColors,
+                                colorEnabled = colorEnabled,
                                 drawSourceImage = false,
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -196,8 +202,8 @@ fun AsciiPreviewScreen() {
 private fun DisplayModeChipBar(
     displayMode: AsciiDisplayMode,
     onDisplayModeChange: (AsciiDisplayMode) -> Unit,
-    invertEnabled: Boolean,
-    onInvertEnabledChange: (Boolean) -> Unit,
+    colorEnabled: Boolean,
+    onColorEnabledChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -219,13 +225,6 @@ private fun DisplayModeChipBar(
                 border = chipBorder
             )
             FilterChip(
-                selected = displayMode == AsciiDisplayMode.ASCII_OVERLAY,
-                onClick = { onDisplayModeChange(AsciiDisplayMode.ASCII_OVERLAY) },
-                label = { Text("Overlay") },
-                colors = transparentChipColors,
-                border = chipBorder
-            )
-            FilterChip(
                 selected = displayMode == AsciiDisplayMode.ASCII_ONLY,
                 onClick = { onDisplayModeChange(AsciiDisplayMode.ASCII_ONLY) },
                 label = { Text("ASCII") },
@@ -238,10 +237,10 @@ private fun DisplayModeChipBar(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Invert")
+            Text("Colour")
             Switch(
-                checked = invertEnabled,
-                onCheckedChange = onInvertEnabledChange
+                checked = colorEnabled,
+                onCheckedChange = onColorEnabledChange
             )
         }
     }
@@ -251,15 +250,15 @@ private fun DisplayModeChipBar(
 private fun CameraAnalysisPipeline(
     scaleFactor: Int,
     contrastFactor: Float,
-    invertEnabled: Boolean,
+    colorEnabled: Boolean,
     displayMode: AsciiDisplayMode,
-    onFrameProcessed: (Bitmap, String, Double, Double) -> Unit
+    onFrameProcessed: (Bitmap, String, IntArray?, Double, Double) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val currentScaleFactor by rememberUpdatedState(scaleFactor)
     val currentContrastFactor by rememberUpdatedState(contrastFactor)
-    val currentInvertEnabled by rememberUpdatedState(invertEnabled)
+    val currentColorEnabled by rememberUpdatedState(colorEnabled)
     val currentDisplayMode by rememberUpdatedState(displayMode)
     val currentFrameCallback by rememberUpdatedState(onFrameProcessed)
     val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
@@ -276,7 +275,7 @@ private fun CameraAnalysisPipeline(
             CameraFrameAnalyzer(
                 scaleFactorProvider = { currentScaleFactor },
                 contrastFactorProvider = { currentContrastFactor },
-                invertEnabledProvider = { currentInvertEnabled },
+                colorEnabledProvider = { currentColorEnabled },
                 displayModeProvider = { currentDisplayMode },
                 onFrameProcessed = currentFrameCallback
             )
@@ -341,17 +340,20 @@ private fun ImagePreview(bitmap: Bitmap, modifier: Modifier = Modifier) {
 private fun AsciiGridPreview(
     bitmap: Bitmap,
     asciiText: String,
+    asciiColors: IntArray?,
+    colorEnabled: Boolean,
     drawSourceImage: Boolean,
     modifier: Modifier,
 ) {
     val rows = remember(asciiText) { asciiText.split('\n') }
+    val defaultAsciiColor = MaterialTheme.colorScheme.onSurface.toArgb()
     val textPaint = remember {
         AndroidPaint().apply {
             isAntiAlias = true
             typeface = android.graphics.Typeface.MONOSPACE
         }
     }
-    textPaint.color = MaterialTheme.colorScheme.onSurface.toArgb()
+    textPaint.color = defaultAsciiColor
 
     Canvas(
         modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant)
@@ -407,6 +409,12 @@ private fun AsciiGridPreview(
                 for (x in 0 until bitmap.width) {
                     val char = row.getOrElse(x) { ' ' }
                     val text = char.toString()
+                    val pixelIndex = (y * bitmap.width) + x
+                    textPaint.color = if (colorEnabled) {
+                        asciiColors?.getOrNull(pixelIndex) ?: defaultAsciiColor
+                    } else {
+                        defaultAsciiColor
+                    }
                     val charWidth = textPaint.measureText(text)
                     val left = drawOffsetX + (x * cellWidth)
                     val textX = left + ((cellWidth - charWidth) / 2f)
