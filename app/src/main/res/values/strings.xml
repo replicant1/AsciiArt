@@ -3,6 +3,7 @@
     <string name="app_title">ASCII Art</string>
 
     <!-- ASCII Preview Screen -->
+    <string name="ascii_preview_load_video_button">Load...</string>
     <string name="ascii_preview_scale_factor_label">Scale factor: %1$d x</string>
     <string name="ascii_preview_contrast_label">Contrast: %1$d%%</string>
     <string name="ascii_preview_image_button">Image</string>

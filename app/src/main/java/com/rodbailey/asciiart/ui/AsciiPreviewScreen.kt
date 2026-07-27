@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Paint as AndroidPaint
+import android.net.Uri
 import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -29,6 +30,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -55,6 +57,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.rodbailey.asciiart.camera.CameraFrameAnalyzer
 import com.rodbailey.asciiart.processing.AsciiDisplayMode
+import com.rodbailey.asciiart.video.VideoFrameAnalyzer
+import com.rodbailey.asciiart.video.VideoProcessor
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
@@ -70,6 +74,9 @@ fun AsciiPreviewScreen() {
     var liveBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var liveAsciiText by remember { mutableStateOf("") }
     var liveAsciiColors by remember { mutableStateOf<IntArray?>(null) }
+    
+    var useVideo by remember { mutableStateOf(false) }
+    var videoUri by remember { mutableStateOf<Uri?>(null) }
 
     val context = LocalContext.current
     var hasCameraPermission by remember {
@@ -85,6 +92,15 @@ fun AsciiPreviewScreen() {
     ) { granted ->
         hasCameraPermission = granted
     }
+    
+    val videoFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            videoUri = uri
+            useVideo = true
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -92,7 +108,20 @@ fun AsciiPreviewScreen() {
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(stringResource(R.string.app_title), style = MaterialTheme.typography.titleLarge)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(stringResource(R.string.app_title), style = MaterialTheme.typography.titleLarge)
+            Button(
+                onClick = { videoFileLauncher.launch(arrayOf("video/*")) },
+                modifier = Modifier.padding(end = 8.dp)
+            ) {
+                Text(stringResource(R.string.ascii_preview_load_video_button))
+            }
+        }
+        
         Text(stringResource(R.string.ascii_preview_scale_factor_label, scaleFactor), style = MaterialTheme.typography.labelLarge)
         Slider(
             value = scaleFactor.toFloat(),
@@ -118,7 +147,24 @@ fun AsciiPreviewScreen() {
                 .weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            if (!hasCameraPermission) {
+            if (useVideo && videoUri != null) {
+                VideoPlaybackPipeline(
+                    videoUri = videoUri!!,
+                    scaleFactor = scaleFactor,
+                    contrastFactor = contrastFactor,
+                    colorEnabled = colorEnabled,
+                    displayMode = displayMode,
+                    onFrameProcessed = { bitmap, asciiText, asciiColors ->
+                        liveBitmap = bitmap
+                        liveAsciiText = asciiText
+                        liveAsciiColors = asciiColors
+                    },
+                    onLoadFailed = {
+                        useVideo = false
+                        videoUri = null
+                    }
+                )
+            } else if (!hasCameraPermission) {
                 Button(onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) }) {
                     Text(stringResource(R.string.camera_permission_request_button))
                 }
@@ -143,60 +189,124 @@ fun AsciiPreviewScreen() {
                         liveAsciiColors = asciiColors
                     }
                 )
+            }
 
-                val liveBitmapValue = liveBitmap
-                if (liveBitmapValue != null) {
-                    when (displayMode) {
-                        AsciiDisplayMode.IMAGE_ONLY -> {
-                            ImagePreview(
-                                bitmap = liveBitmapValue,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f)
-                            )
-                        }
-
-                        AsciiDisplayMode.ASCII_OVERLAY -> {
-                            AsciiGridPreview(
-                                bitmap = liveBitmapValue,
-                                asciiText = liveAsciiText,
-                                asciiColors = liveAsciiColors,
-                                colorEnabled = colorEnabled,
-                                drawSourceImage = true,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f)
-                            )
-                        }
-
-                        AsciiDisplayMode.ASCII_ONLY -> {
-                            AsciiGridPreview(
-                                bitmap = liveBitmapValue,
-                                asciiText = liveAsciiText,
-                                asciiColors = liveAsciiColors,
-                                colorEnabled = colorEnabled,
-                                drawSourceImage = false,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f)
-                            )
-                        }
+            val liveBitmapValue = liveBitmap
+            if (liveBitmapValue != null) {
+                when (displayMode) {
+                    AsciiDisplayMode.IMAGE_ONLY -> {
+                        ImagePreview(
+                            bitmap = liveBitmapValue,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                        )
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(stringResource(R.string.ascii_preview_waiting_for_frames), style = MaterialTheme.typography.labelMedium)
+
+                    AsciiDisplayMode.ASCII_OVERLAY -> {
+                        AsciiGridPreview(
+                            bitmap = liveBitmapValue,
+                            asciiText = liveAsciiText,
+                            asciiColors = liveAsciiColors,
+                            colorEnabled = colorEnabled,
+                            drawSourceImage = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                        )
+                    }
+
+                    AsciiDisplayMode.ASCII_ONLY -> {
+                        AsciiGridPreview(
+                            bitmap = liveBitmapValue,
+                            asciiText = liveAsciiText,
+                            asciiColors = liveAsciiColors,
+                            colorEnabled = colorEnabled,
+                            drawSourceImage = false,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                        )
                     }
                 }
-
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(stringResource(R.string.ascii_preview_waiting_for_frames), style = MaterialTheme.typography.labelMedium)
+                }
             }
+
         }
 
+    }
+}
+
+@Composable
+private fun VideoPlaybackPipeline(
+    videoUri: Uri,
+    scaleFactor: Int,
+    contrastFactor: Float,
+    colorEnabled: Boolean,
+    displayMode: AsciiDisplayMode,
+    onFrameProcessed: (Bitmap, String, IntArray?) -> Unit,
+    onLoadFailed: () -> Unit
+) {
+    val context = LocalContext.current
+    val currentScaleFactor by rememberUpdatedState(scaleFactor)
+    val currentContrastFactor by rememberUpdatedState(contrastFactor)
+    val currentColorEnabled by rememberUpdatedState(colorEnabled)
+    val currentDisplayMode by rememberUpdatedState(displayMode)
+    val currentFrameCallback by rememberUpdatedState(onFrameProcessed)
+
+    val videoProcessor = remember(videoUri) {
+        VideoProcessor(context)
+    }
+
+    val frameAnalyzer = remember {
+        VideoFrameAnalyzer(
+            scaleFactorProvider = { currentScaleFactor },
+            contrastFactorProvider = { currentContrastFactor },
+            colorEnabledProvider = { currentColorEnabled },
+            displayModeProvider = { currentDisplayMode },
+            onFrameProcessed = currentFrameCallback
+        )
+    }
+
+    LaunchedEffect(videoUri) {
+        val loaded = videoProcessor.loadVideo(videoUri)
+        if (!loaded) {
+            Log.e(TAG, "Failed to load video: $videoUri")
+            onLoadFailed()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        val executor = Executors.newSingleThreadExecutor()
+        val frameProcessingJob = Executors.newScheduledThreadPool(1).scheduleAtFixedRate(
+            {
+                val frame = videoProcessor.getNextFrame()
+                if (frame != null) {
+                    val videoRotation = videoProcessor.getVideoRotation()
+                    val rotation = if (videoRotation == 0) 90 else 0  // Rotate landscape videos
+                    frameAnalyzer.processFrame(frame, rotation)
+                    frame.recycle()
+                }
+            },
+            0,
+            (1000L / videoProcessor.getFrameRate().coerceAtLeast(1)).coerceAtLeast(16),
+            java.util.concurrent.TimeUnit.MILLISECONDS
+        )
+
+        onDispose {
+            frameProcessingJob.cancel(true)
+            executor.shutdown()
+            videoProcessor.release()
+        }
     }
 }
 
