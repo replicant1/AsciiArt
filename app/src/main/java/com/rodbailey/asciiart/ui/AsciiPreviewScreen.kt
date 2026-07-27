@@ -339,61 +339,88 @@ private fun VideoPlaybackPipeline(
         )
     }
 
-    LaunchedEffect(videoUri) {
-        val loaded = videoProcessor.loadVideo(videoUri)
-        if (!loaded) {
-            Log.e(TAG, "Failed to load video: $videoUri")
-            onLoadFailed()
-        } else {
-            // Process first frame immediately
-            val firstFrame = videoProcessor.getNextFrame()
-            if (firstFrame != null) {
-                val videoRotation = videoProcessor.getVideoRotation()
-                val rotation = if (videoRotation == 0) 90 else 0
-                frameAnalyzer.processFrame(firstFrame, rotation)
-                firstFrame.recycle()
-            }
-        }
-    }
-
-    DisposableEffect(Unit) {
-        val executor = Executors.newSingleThreadExecutor()
-        // Process frames at a slower rate - every 100ms instead of based on video frame rate
-        val frameProcessingJob = Executors.newScheduledThreadPool(1).scheduleAtFixedRate(
-            {
-                var framesToSkip = 30  // Skip ~30 frames at 30fps = ~1 frame per second
-                repeat(framesToSkip) {
-                    val frame = videoProcessor.getNextFrame()
-                    frame?.recycle()
+    DisposableEffect(videoUri) {
+        Log.d(TAG, "VideoPlaybackPipeline mounted, starting video load and frame extraction")
+        
+        // Use a single-threaded executor to load video and extract frames
+        val videoExecutor = Executors.newSingleThreadExecutor()
+        var isRunning = true
+        var videoLoaded = false
+        
+        videoExecutor.execute {
+            try {
+                // Load video on background thread (blocking operation)
+                Log.d(TAG, "Loading video from $videoUri")
+                val loadStart = System.currentTimeMillis()
+                val loaded = videoProcessor.loadVideo(videoUri)
+                val loadTime = System.currentTimeMillis() - loadStart
+                
+                if (!loaded) {
+                    Log.e(TAG, "Failed to load video after ${loadTime}ms")
+                    onLoadFailed()
+                    return@execute
                 }
                 
-                // Process the next frame
-                val frame = videoProcessor.getNextFrame()
-                if (frame != null) {
-                    val videoRotation = videoProcessor.getVideoRotation()
-                    val rotation = if (videoRotation == 0) 90 else 0
-                    frameAnalyzer.processFrame(frame, rotation)
-                    frame.recycle()
+                videoLoaded = true
+                Log.d(TAG, "Video loaded in ${loadTime}ms, starting frame extraction")
+                
+                // Extract and display frames at controlled rate: only every 30th frame
+                var frameIndex = 0
+                val extractionStart = System.currentTimeMillis()
+                
+                while (isRunning && videoLoaded) {
+                    val extractStart = System.currentTimeMillis()
+                    // Set frame index to only extract the frame we want (every 30th)
+                    videoProcessor.setFrameIndex(frameIndex)
+                    val frame = videoProcessor.getFrameAtIndex(frameIndex)
+                    val extractDuration = System.currentTimeMillis() - extractStart
                     
-                    // Update playback time
-                    val currentFrameIndex = videoProcessor.getCurrentFrameIndex()
-                    val totalFrames = videoProcessor.getTotalFrames()
-                    val frameRate = videoProcessor.getFrameRate()
-                    if (frameRate > 0) {
-                        val currentMs = (currentFrameIndex * 1000L) / frameRate
-                        val totalMs = (totalFrames * 1000L) / frameRate
-                        currentPlaybackTimeCallback(currentMs, totalMs)
+                    if (frame != null) {
+                        Log.d(TAG, "Processing frame ${frameIndex} at ${System.currentTimeMillis() - extractionStart}ms, extraction took ${extractDuration}ms")
+                        
+                        val videoRotation = videoProcessor.getVideoRotation()
+                        val rotation = if (videoRotation == 0) 90 else 0
+                        frameAnalyzer.processFrame(frame, rotation)
+                        // DO NOT recycle frame - bitmap lifecycle is managed by frameAnalyzer and callbacks
+                        
+                        // Update playback time
+                        val totalFrames = videoProcessor.getTotalFrames()
+                        val frameRate = videoProcessor.getFrameRate()
+                        if (frameRate > 0) {
+                            val currentMs = (frameIndex * 1000L) / frameRate
+                            val totalMs = (totalFrames * 1000L) / frameRate
+                            currentPlaybackTimeCallback(currentMs, totalMs)
+                        }
+                        
+                        // Skip to next frame to process (every 5th)
+                        frameIndex += 5
+                        if (frameIndex >= totalFrames) {
+                            // End of video reached, stop playback
+                            Log.d(TAG, "End of video reached at frame $frameIndex / $totalFrames")
+                            isRunning = false
+                        }
+                    } else {
+                        Log.d(TAG, "Failed to extract frame at index $frameIndex, restarting")
+                        frameIndex = 0
+                        Thread.sleep(100)
                     }
                 }
-            },
-            100,  // Start after 100ms
-            100,  // Repeat every 100ms
-            java.util.concurrent.TimeUnit.MILLISECONDS
-        )
+                Log.d(TAG, "Frame extraction thread exiting")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in video pipeline: ${e.message}", e)
+                onLoadFailed()
+            }
+        }
 
         onDispose {
-            frameProcessingJob.cancel(true)
-            executor.shutdown()
+            Log.d(TAG, "Disposing video pipeline")
+            isRunning = false
+            videoExecutor.shutdown()
+            try {
+                videoExecutor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error shutting down executor: ${e.message}")
+            }
             videoProcessor.release()
         }
     }

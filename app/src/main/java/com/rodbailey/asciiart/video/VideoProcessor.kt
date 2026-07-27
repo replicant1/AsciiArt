@@ -22,8 +22,14 @@ class VideoFrameExtractor(private val context: Context) {
 
     fun initialize(videoUri: Uri): Boolean {
         return try {
+            val startInit = System.currentTimeMillis()
             retriever = MediaMetadataRetriever()
+            val afterCreate = System.currentTimeMillis()
+            Log.d(TAG, "MMR created in ${afterCreate - startInit}ms")
+            
             retriever?.setDataSource(context, videoUri)
+            val afterSetData = System.currentTimeMillis()
+            Log.d(TAG, "setDataSource took ${afterSetData - afterCreate}ms")
 
             val widthStr = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
             val heightStr = retriever?.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
@@ -43,7 +49,8 @@ class VideoFrameExtractor(private val context: Context) {
                 0
             }
 
-            Log.d(TAG, "Video initialized: ${videoWidth}x${videoHeight} rotation=$videoRotation @ ${frameRateNum}fps, total frames: $totalFrames")
+            val endInit = System.currentTimeMillis()
+            Log.d(TAG, "Video initialized in ${endInit - startInit}ms: ${videoWidth}x${videoHeight} rotation=$videoRotation @ ${frameRateNum}fps, total frames: $totalFrames")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize video", e)
@@ -57,7 +64,13 @@ class VideoFrameExtractor(private val context: Context) {
                 return null
             }
             val timeUs = (frameIndex * 1_000_000L) / frameRateNum.coerceAtLeast(1)
-            retriever?.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            val startExtract = System.currentTimeMillis()
+            val bitmap = retriever?.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            val extractTime = System.currentTimeMillis() - startExtract
+            if (extractTime > 100) {
+                Log.w(TAG, "Slow frame extraction: frame $frameIndex took ${extractTime}ms")
+            }
+            bitmap
         } catch (e: Exception) {
             Log.e(TAG, "Failed to extract frame at index $frameIndex", e)
             null
@@ -143,6 +156,13 @@ class VideoProcessor(private val context: Context) {
     fun getTotalFrames(): Int = extractor?.getTotalFrames() ?: 0
 
     fun getCurrentFrameIndex(): Int = currentFrameIndex
+
+    fun skipFrames(count: Int) {
+        currentFrameIndex += count
+        if (currentFrameIndex >= (extractor?.getTotalFrames() ?: 0)) {
+            currentFrameIndex = 0
+        }
+    }
 
     fun getVideoWidth(): Int = extractor?.getVideoWidth() ?: 0
 
