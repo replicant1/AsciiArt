@@ -45,9 +45,11 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.rodbailey.asciiart.R
 import androidx.compose.foundation.BorderStroke
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -90,14 +92,14 @@ fun AsciiPreviewScreen() {
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("ASCII Art", style = MaterialTheme.typography.titleLarge)
-        Text("Scale factor: $scaleFactor x", style = MaterialTheme.typography.labelLarge)
+        Text(stringResource(R.string.app_title), style = MaterialTheme.typography.titleLarge)
+        Text(stringResource(R.string.ascii_preview_scale_factor_label, scaleFactor), style = MaterialTheme.typography.labelLarge)
         Slider(
             value = scaleFactor.toFloat(),
             onValueChange = { scaleFactor = it.roundToInt().coerceIn(2, 24) },
             valueRange = 2f..24f
         )
-        Text("Contrast: ${(contrastFactor * 100f).roundToInt()}%", style = MaterialTheme.typography.labelLarge)
+        Text(stringResource(R.string.ascii_preview_contrast_label, (contrastFactor * 100f).roundToInt()), style = MaterialTheme.typography.labelLarge)
         Slider(
             value = contrastFactor,
             onValueChange = { contrastFactor = it.coerceIn(0.2f, 2.0f) },
@@ -118,7 +120,7 @@ fun AsciiPreviewScreen() {
         ) {
             if (!hasCameraPermission) {
                 Button(onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) }) {
-                    Text("Grant permission")
+                    Text(stringResource(R.string.camera_permission_request_button))
                 }
                 Box(
                     modifier = Modifier
@@ -127,7 +129,7 @@ fun AsciiPreviewScreen() {
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("Camera access required", style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.camera_permission_required), style = MaterialTheme.typography.labelMedium)
                 }
             } else {
                 CameraAnalysisPipeline(
@@ -188,7 +190,7 @@ fun AsciiPreviewScreen() {
                             .background(MaterialTheme.colorScheme.surfaceVariant),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("Waiting for frames...", style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(R.string.ascii_preview_waiting_for_frames), style = MaterialTheme.typography.labelMedium)
                     }
                 }
 
@@ -220,14 +222,14 @@ private fun DisplayModeChipBar(
             FilterChip(
                 selected = displayMode == AsciiDisplayMode.IMAGE_ONLY,
                 onClick = { onDisplayModeChange(AsciiDisplayMode.IMAGE_ONLY) },
-                label = { Text("Image") },
+                label = { Text(stringResource(R.string.ascii_preview_image_button)) },
                 colors = transparentChipColors,
                 border = chipBorder
             )
             FilterChip(
                 selected = displayMode == AsciiDisplayMode.ASCII_ONLY,
                 onClick = { onDisplayModeChange(AsciiDisplayMode.ASCII_ONLY) },
-                label = { Text("ASCII") },
+                label = { Text(stringResource(R.string.ascii_preview_ascii_button)) },
                 colors = transparentChipColors,
                 border = chipBorder
             )
@@ -237,7 +239,7 @@ private fun DisplayModeChipBar(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Colour")
+            Text(stringResource(R.string.ascii_preview_colour_label))
             Switch(
                 checked = colorEnabled,
                 onCheckedChange = onColorEnabledChange
@@ -347,6 +349,7 @@ private fun AsciiGridPreview(
 ) {
     val rows = remember(asciiText) { asciiText.split('\n') }
     val defaultAsciiColor = MaterialTheme.colorScheme.onSurface.toArgb()
+    val gridWidthSampleChar = stringResource(R.string.grid_width_sample_char)
     val textPaint = remember {
         AndroidPaint().apply {
             isAntiAlias = true
@@ -395,7 +398,7 @@ private fun AsciiGridPreview(
             val cellHeight = drawHeight / bitmap.height
             val baseTextSize = cellHeight * 0.92f
             textPaint.textSize = baseTextSize
-            val sampleWidth = textPaint.measureText("W").coerceAtLeast(1f)
+            val sampleWidth = textPaint.measureText(gridWidthSampleChar).coerceAtLeast(1f)
             if (sampleWidth > cellWidth) {
                 textPaint.textSize = baseTextSize * (cellWidth / sampleWidth)
             }
