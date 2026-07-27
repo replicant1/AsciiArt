@@ -30,7 +30,7 @@ import com.rodbailey.asciiart.processing.ExoPlayerFrameListener
 private const val TAG = "VideoFilePlayer"
 
 // Path to test video file on device
-private const val TEST_VIDEO_PATH = "file:///sdcard/Downloads/blue-eyes.mp4"
+private const val TEST_VIDEO_PATH = "file:///sdcard/Download/blue-eyes.mp4"
 
 @Composable
 fun ExoPlayerVideoFileTab(
@@ -49,7 +49,10 @@ fun ExoPlayerVideoFileTab(
     var showVideo by remember { mutableStateOf(true) }
     var frameCount by remember { mutableStateOf(0) }
 
+    Log.i(TAG, "ExoPlayerVideoFileTab composable rendering")
+
     DisposableEffect(Unit) {
+        Log.i(TAG, "DisposableEffect: Initializing ExoPlayer")
         val player = ExoPlayer.Builder(context).build()
         exoPlayer = player
 
@@ -59,6 +62,7 @@ fun ExoPlayerVideoFileTab(
         player.prepare()
 
         // Create and start frame listener
+        Log.i(TAG, "Creating ExoPlayerFrameListener...")
         val listener = ExoPlayerFrameListener(
             exoPlayer = player,
             videoUri = TEST_VIDEO_PATH.removePrefix("file://"),
@@ -72,16 +76,19 @@ fun ExoPlayerVideoFileTab(
                 asciiText = ascii
                 asciiColors = colors
                 frameCount++
+                Log.i(TAG, "Frame processed: #$frameCount")
             }
         )
         frameListener = listener
+        Log.i(TAG, "Starting frame listener...")
         listener.startListening()
 
         player.play()
 
-        Log.d(TAG, "ExoPlayer initialized with video: $TEST_VIDEO_PATH")
+        Log.i(TAG, "ExoPlayer initialized with video: $TEST_VIDEO_PATH")
 
         onDispose {
+            Log.i(TAG, "Disposing ExoPlayer and frame listener")
             listener.release()
             player.release()
             exoPlayer = null

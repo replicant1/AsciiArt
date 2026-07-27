@@ -45,6 +45,8 @@ class ExoPlayerFrameListener(
         if (isProcessing) return
         isProcessing = true
         
+        Log.i(TAG, "startListening() called - video URI: $videoUri")
+        
         // Use a polling approach to check for frame updates
         mainThreadHandler.post(frameUpdateChecker)
         
@@ -52,7 +54,7 @@ class ExoPlayerFrameListener(
             name = "ExoPlayerFrameProcessor"
             start()
         }
-        Log.d(TAG, "Frame listener started (skip rate: $frameSkipRate)")
+        Log.i(TAG, "Frame listener started (skip rate: $frameSkipRate)")
     }
 
     fun stopListening() {
