@@ -14,6 +14,7 @@ import com.rodbailey.asciiart.processing.ImageProcessor
 class CameraFrameAnalyzer(
     private val scaleFactorProvider: () -> Int,
     private val contrastFactorProvider: () -> Float,
+    private val invertEnabledProvider: () -> Boolean,
     private val displayModeProvider: () -> AsciiDisplayMode,
     private val onFrameProcessed: (
         bitmap: Bitmap,
@@ -32,7 +33,8 @@ class CameraFrameAnalyzer(
         val bitmap = ImageProcessor.grayscaleDownscaleLumaPlane(
             image = image,
             scaleFactor = scaleFactorProvider(),
-            contrastFactor = contrastFactorProvider()
+            contrastFactor = contrastFactorProvider(),
+            invertEnabled = invertEnabledProvider()
         )
         image.close()
         val orientedBitmap = rotateBitmapIfNeeded(bitmap, rotationDegrees)
