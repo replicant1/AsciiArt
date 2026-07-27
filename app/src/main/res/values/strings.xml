@@ -1,3 +1,19 @@
 <resources>
     <string name="app_name">AsciiArt</string>
+    <string name="app_title">ASCII Art</string>
+
+    <!-- ASCII Preview Screen -->
+    <string name="ascii_preview_scale_factor_label">Scale factor: %1$d x</string>
+    <string name="ascii_preview_contrast_label">Contrast: %1$d%%</string>
+    <string name="ascii_preview_image_button">Image</string>
+    <string name="ascii_preview_ascii_button">ASCII</string>
+    <string name="ascii_preview_colour_label">Colour</string>
+    <string name="ascii_preview_waiting_for_frames">Waiting for frames...</string>
+
+    <!-- Camera Permissions -->
+    <string name="camera_permission_request_button">Grant permission</string>
+    <string name="camera_permission_required">Camera access required</string>
+
+    <!-- Grid Text -->
+    <string name="grid_width_sample_char">W</string>
 </resources>
