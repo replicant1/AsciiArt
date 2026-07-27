@@ -26,6 +26,8 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -63,14 +65,15 @@ private const val TAG = "AsciiPreviewScreen"
 
 @Composable
 fun AsciiPreviewScreen() {
+    // Shared slider controls for both camera and video pipelines
     var scaleFactor by remember { mutableIntStateOf(8) }
     var contrastFactor by remember { mutableFloatStateOf(1.0f) }
     var colorEnabled by remember { mutableStateOf(false) }
     var displayMode by remember { mutableStateOf(AsciiDisplayMode.IMAGE_ONLY) }
-    var liveBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var liveAsciiText by remember { mutableStateOf("") }
-    var liveAsciiColors by remember { mutableStateOf<IntArray?>(null) }
-
+    
+    // Tab selection state
+    var selectedTab by remember { mutableIntStateOf(0) }
+    
     val context = LocalContext.current
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -92,112 +95,202 @@ fun AsciiPreviewScreen() {
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        // Header
         Text(stringResource(R.string.app_title), style = MaterialTheme.typography.titleLarge)
-        Text(stringResource(R.string.ascii_preview_scale_factor_label, scaleFactor), style = MaterialTheme.typography.labelLarge)
-        Slider(
-            value = scaleFactor.toFloat(),
-            onValueChange = { scaleFactor = it.roundToInt().coerceIn(2, 24) },
-            valueRange = 2f..24f
-        )
-        Text(stringResource(R.string.ascii_preview_contrast_label, (contrastFactor * 100f).roundToInt()), style = MaterialTheme.typography.labelLarge)
-        Slider(
-            value = contrastFactor,
-            onValueChange = { contrastFactor = it.coerceIn(0.2f, 2.0f) },
-            valueRange = 0.2f..2.0f
-        )
-        DisplayModeChipBar(
-            displayMode = displayMode,
-            onDisplayModeChange = { displayMode = it },
-            colorEnabled = colorEnabled,
-            onColorEnabledChange = { colorEnabled = it },
-            modifier = Modifier.fillMaxWidth()
-        )
+        
+        // Shared Controls Section (sliders, display mode, color toggle)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                stringResource(R.string.ascii_preview_scale_factor_label, scaleFactor),
+                style = MaterialTheme.typography.labelLarge
+            )
+            Slider(
+                value = scaleFactor.toFloat(),
+                onValueChange = { scaleFactor = it.roundToInt().coerceIn(2, 24) },
+                valueRange = 2f..24f
+            )
+            Text(
+                stringResource(R.string.ascii_preview_contrast_label, (contrastFactor * 100f).roundToInt()),
+                style = MaterialTheme.typography.labelLarge
+            )
+            Slider(
+                value = contrastFactor,
+                onValueChange = { contrastFactor = it.coerceIn(0.2f, 2.0f) },
+                valueRange = 0.2f..2.0f
+            )
+            DisplayModeChipBar(
+                displayMode = displayMode,
+                onDisplayModeChange = { displayMode = it },
+                colorEnabled = colorEnabled,
+                onColorEnabledChange = { colorEnabled = it },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        
+        // Tab Selection
+        TabRow(selectedTabIndex = selectedTab) {
+            Tab(
+                selected = selectedTab == 0,
+                onClick = { selectedTab = 0 },
+                text = { Text("Live Camera") }
+            )
+            Tab(
+                selected = selectedTab == 1,
+                onClick = { selectedTab = 1 },
+                text = { Text("Video File") }
+            )
+        }
+        
+        // Content Area (switches based on selected tab)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            if (!hasCameraPermission) {
-                Button(onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) }) {
-                    Text(stringResource(R.string.camera_permission_request_button))
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(stringResource(R.string.camera_permission_required), style = MaterialTheme.typography.labelMedium)
-                }
-            } else {
-                CameraAnalysisPipeline(
-                    scaleFactor = scaleFactor,
-                    contrastFactor = contrastFactor,
-                    colorEnabled = colorEnabled,
-                    displayMode = displayMode,
-                    onFrameProcessed = { bitmap, asciiText, asciiColors ->
-                        liveBitmap = bitmap
-                        liveAsciiText = asciiText
-                        liveAsciiColors = asciiColors
+            when (selectedTab) {
+                0 -> {
+                    // Camera tab
+                    if (!hasCameraPermission) {
+                        Button(onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) }) {
+                            Text(stringResource(R.string.camera_permission_request_button))
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                stringResource(R.string.camera_permission_required),
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    } else {
+                        CameraTabContent(
+                            scaleFactor = scaleFactor,
+                            contrastFactor = contrastFactor,
+                            colorEnabled = colorEnabled,
+                            displayMode = displayMode,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
-                )
+                }
+                
+                1 -> {
+                    // Video file tab
+                    VideoFileTabContent(
+                        scaleFactor = scaleFactor,
+                        contrastFactor = contrastFactor,
+                        colorEnabled = colorEnabled,
+                        displayMode = displayMode,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+}
 
-                val liveBitmapValue = liveBitmap
-                if (liveBitmapValue != null) {
-                    when (displayMode) {
-                        AsciiDisplayMode.IMAGE_ONLY -> {
-                            ImagePreview(
-                                bitmap = liveBitmapValue,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f)
-                            )
-                        }
+@Composable
+private fun CameraTabContent(
+    scaleFactor: Int,
+    contrastFactor: Float,
+    colorEnabled: Boolean,
+    displayMode: AsciiDisplayMode,
+    modifier: Modifier = Modifier
+) {
+    var liveBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var liveAsciiText by remember { mutableStateOf("") }
+    var liveAsciiColors by remember { mutableStateOf<IntArray?>(null) }
+    
+    Column(modifier = modifier.fillMaxSize()) {
+        CameraAnalysisPipeline(
+            scaleFactor = scaleFactor,
+            contrastFactor = contrastFactor,
+            colorEnabled = colorEnabled,
+            displayMode = displayMode,
+            onFrameProcessed = { bitmap, asciiText, asciiColors ->
+                liveBitmap = bitmap
+                liveAsciiText = asciiText
+                liveAsciiColors = asciiColors
+            }
+        )
 
-                        AsciiDisplayMode.ASCII_OVERLAY -> {
-                            AsciiGridPreview(
-                                bitmap = liveBitmapValue,
-                                asciiText = liveAsciiText,
-                                asciiColors = liveAsciiColors,
-                                colorEnabled = colorEnabled,
-                                drawSourceImage = true,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f)
-                            )
-                        }
-
-                        AsciiDisplayMode.ASCII_ONLY -> {
-                            AsciiGridPreview(
-                                bitmap = liveBitmapValue,
-                                asciiText = liveAsciiText,
-                                asciiColors = liveAsciiColors,
-                                colorEnabled = colorEnabled,
-                                drawSourceImage = false,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f)
-                            )
-                        }
-                    }
-                } else {
-                    Box(
+        val liveBitmapValue = liveBitmap
+        if (liveBitmapValue != null) {
+            when (displayMode) {
+                AsciiDisplayMode.IMAGE_ONLY -> {
+                    ImagePreview(
+                        bitmap = liveBitmapValue,
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(stringResource(R.string.ascii_preview_waiting_for_frames), style = MaterialTheme.typography.labelMedium)
-                    }
+                    )
                 }
 
+                AsciiDisplayMode.ASCII_OVERLAY -> {
+                    AsciiGridPreview(
+                        bitmap = liveBitmapValue,
+                        asciiText = liveAsciiText,
+                        asciiColors = liveAsciiColors,
+                        colorEnabled = colorEnabled,
+                        drawSourceImage = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    )
+                }
+
+                AsciiDisplayMode.ASCII_ONLY -> {
+                    AsciiGridPreview(
+                        bitmap = liveBitmapValue,
+                        asciiText = liveAsciiText,
+                        asciiColors = liveAsciiColors,
+                        colorEnabled = colorEnabled,
+                        drawSourceImage = false,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    )
+                }
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(stringResource(R.string.ascii_preview_waiting_for_frames), style = MaterialTheme.typography.labelMedium)
             }
         }
-
     }
+}
+
+@Composable
+private fun VideoFileTabContent(
+    scaleFactor: Int,
+    contrastFactor: Float,
+    colorEnabled: Boolean,
+    displayMode: AsciiDisplayMode,
+    modifier: Modifier = Modifier
+) {
+    ExoPlayerVideoFileTab(
+        scaleFactor = scaleFactor,
+        contrastFactor = contrastFactor,
+        colorEnabled = colorEnabled,
+        displayMode = displayMode,
+        modifier = modifier
+    )
 }
 
 @Composable
@@ -328,7 +421,7 @@ private fun CameraAnalysisPipeline(
 }
 
 @Composable
-private fun ImagePreview(bitmap: Bitmap, modifier: Modifier = Modifier) {
+fun ImagePreview(bitmap: Bitmap, modifier: Modifier = Modifier) {
     Image(
         bitmap = bitmap.asImageBitmap(),
         contentDescription = "Processed image preview",
@@ -339,7 +432,7 @@ private fun ImagePreview(bitmap: Bitmap, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun AsciiGridPreview(
+fun AsciiGridPreview(
     bitmap: Bitmap,
     asciiText: String,
     asciiColors: IntArray?,
