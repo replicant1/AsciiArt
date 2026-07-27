@@ -10,7 +10,8 @@ object ImageProcessor {
     fun grayscaleDownscaleLumaPlane(
         image: ImageProxy,
         scaleFactor: Int,
-        contrastFactor: Float
+        contrastFactor: Float,
+        invertEnabled: Boolean
     ): Bitmap {
         val step = scaleFactor.coerceAtLeast(1)
         val contrast = contrastFactor.coerceIn(0.2f, 2.0f)
@@ -36,10 +37,11 @@ object ImageProcessor {
                 val gray = lumaBuffer.get(lumaIndex).toInt() and 0xFF
                 val contrastedGray = (((gray - 128f) * contrast) + 128f).coerceIn(0f, 255f)
                 val adjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
+                val finalGray = if (invertEnabled) 255 - adjustedGray else adjustedGray
                 outputPixels[outIndex] = (0xFF shl 24) or
-                    (adjustedGray shl 16) or
-                    (adjustedGray shl 8) or
-                    adjustedGray
+                    (finalGray shl 16) or
+                    (finalGray shl 8) or
+                    finalGray
                 outIndex++
             }
         }

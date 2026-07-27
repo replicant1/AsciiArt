@@ -25,6 +25,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -62,6 +63,7 @@ private const val TAG = "AsciiPreviewScreen"
 fun AsciiPreviewScreen() {
     var scaleFactor by remember { mutableIntStateOf(8) }
     var contrastFactor by remember { mutableFloatStateOf(1.0f) }
+    var invertEnabled by remember { mutableStateOf(false) }
     var displayMode by remember { mutableStateOf(AsciiDisplayMode.IMAGE_ONLY) }
     var liveBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var liveAsciiText by remember { mutableStateOf("") }
@@ -103,6 +105,8 @@ fun AsciiPreviewScreen() {
         DisplayModeChipBar(
             displayMode = displayMode,
             onDisplayModeChange = { displayMode = it },
+            invertEnabled = invertEnabled,
+            onInvertEnabledChange = { invertEnabled = it },
             modifier = Modifier.fillMaxWidth()
         )
         Column(
@@ -128,6 +132,7 @@ fun AsciiPreviewScreen() {
                 CameraAnalysisPipeline(
                     scaleFactor = scaleFactor,
                     contrastFactor = contrastFactor,
+                    invertEnabled = invertEnabled,
                     displayMode = displayMode,
                     onFrameProcessed = { bitmap, asciiText, _, _ ->
                         liveBitmap = bitmap
@@ -191,38 +196,54 @@ fun AsciiPreviewScreen() {
 private fun DisplayModeChipBar(
     displayMode: AsciiDisplayMode,
     onDisplayModeChange: (AsciiDisplayMode) -> Unit,
+    invertEnabled: Boolean,
+    onInvertEnabledChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        val transparentChipColors = FilterChipDefaults.filterChipColors(
-            containerColor = Color.Transparent,
-            selectedContainerColor = Color.Transparent
-        )
-        val chipBorder = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-        FilterChip(
-            selected = displayMode == AsciiDisplayMode.IMAGE_ONLY,
-            onClick = { onDisplayModeChange(AsciiDisplayMode.IMAGE_ONLY) },
-            label = { Text("Image") },
-            colors = transparentChipColors,
-            border = chipBorder
-        )
-        FilterChip(
-            selected = displayMode == AsciiDisplayMode.ASCII_OVERLAY,
-            onClick = { onDisplayModeChange(AsciiDisplayMode.ASCII_OVERLAY) },
-            label = { Text("Overlay") },
-            colors = transparentChipColors,
-            border = chipBorder
-        )
-        FilterChip(
-            selected = displayMode == AsciiDisplayMode.ASCII_ONLY,
-            onClick = { onDisplayModeChange(AsciiDisplayMode.ASCII_ONLY) },
-            label = { Text("ASCII") },
-            colors = transparentChipColors,
-            border = chipBorder
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val transparentChipColors = FilterChipDefaults.filterChipColors(
+                containerColor = Color.Transparent,
+                selectedContainerColor = Color.Transparent
+            )
+            val chipBorder = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+            FilterChip(
+                selected = displayMode == AsciiDisplayMode.IMAGE_ONLY,
+                onClick = { onDisplayModeChange(AsciiDisplayMode.IMAGE_ONLY) },
+                label = { Text("Image") },
+                colors = transparentChipColors,
+                border = chipBorder
+            )
+            FilterChip(
+                selected = displayMode == AsciiDisplayMode.ASCII_OVERLAY,
+                onClick = { onDisplayModeChange(AsciiDisplayMode.ASCII_OVERLAY) },
+                label = { Text("Overlay") },
+                colors = transparentChipColors,
+                border = chipBorder
+            )
+            FilterChip(
+                selected = displayMode == AsciiDisplayMode.ASCII_ONLY,
+                onClick = { onDisplayModeChange(AsciiDisplayMode.ASCII_ONLY) },
+                label = { Text("ASCII") },
+                colors = transparentChipColors,
+                border = chipBorder
+            )
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Invert")
+            Switch(
+                checked = invertEnabled,
+                onCheckedChange = onInvertEnabledChange
+            )
+        }
     }
 }
 
@@ -230,6 +251,7 @@ private fun DisplayModeChipBar(
 private fun CameraAnalysisPipeline(
     scaleFactor: Int,
     contrastFactor: Float,
+    invertEnabled: Boolean,
     displayMode: AsciiDisplayMode,
     onFrameProcessed: (Bitmap, String, Double, Double) -> Unit
 ) {
@@ -237,6 +259,7 @@ private fun CameraAnalysisPipeline(
     val lifecycleOwner = LocalLifecycleOwner.current
     val currentScaleFactor by rememberUpdatedState(scaleFactor)
     val currentContrastFactor by rememberUpdatedState(contrastFactor)
+    val currentInvertEnabled by rememberUpdatedState(invertEnabled)
     val currentDisplayMode by rememberUpdatedState(displayMode)
     val currentFrameCallback by rememberUpdatedState(onFrameProcessed)
     val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
@@ -253,6 +276,7 @@ private fun CameraAnalysisPipeline(
             CameraFrameAnalyzer(
                 scaleFactorProvider = { currentScaleFactor },
                 contrastFactorProvider = { currentContrastFactor },
+                invertEnabledProvider = { currentInvertEnabled },
                 displayModeProvider = { currentDisplayMode },
                 onFrameProcessed = currentFrameCallback
             )
