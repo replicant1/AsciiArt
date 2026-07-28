@@ -38,6 +38,7 @@ class ExoPlayerFrameListener(
     private var lastProcessedTimeMs = 0L
     private var renderedFrameCount = 0
     private var lastQueuedTimeMs = 0L
+    private var lastDisplayedBitmap: Bitmap? = null  // Track bitmap for recycling
 
     private val retriever by lazy { MediaMetadataRetriever().apply { setDataSource(videoUri) } }
 
@@ -63,6 +64,8 @@ class ExoPlayerFrameListener(
     fun release() {
         stopListening()
         try {
+            lastDisplayedBitmap?.recycle()
+            lastDisplayedBitmap = null
             retriever.release()
         } catch (e: Exception) {
             Log.e(TAG, "Error releasing retriever", e)
@@ -130,25 +133,35 @@ class ExoPlayerFrameListener(
         val scaledHeight = (bitmap.height / scaleFactor).coerceAtLeast(1)
         val scaledBitmap = Bitmap.createScaledBitmap(bitmap, scaledWidth, scaledHeight, true)
 
-        // Process through ImageProcessor to get grayscale and colors
-        val frameResult = ImageProcessor.processBitmap(
-            bitmap = scaledBitmap,
-            contrastFactor = contrastFactorProvider(),
-            colorEnabled = true  // Always generate colors for flexibility
-        )
+        try {
+            // Process through ImageProcessor to get grayscale and colors
+            val frameResult = ImageProcessor.processBitmap(
+                bitmap = scaledBitmap,
+                contrastFactor = contrastFactorProvider(),
+                colorEnabled = true  // Always generate colors for flexibility
+            )
 
-        // Generate ASCII text (always, regardless of display mode)
-        val asciiText = AsciiArt.toAsciiText(
-            grayscaleBitmap = frameResult.grayscaleBitmap,
-            preset = AsciiCharsetPreset.PRINTABLE
-        )
+            // Generate ASCII text (always, regardless of display mode)
+            val asciiText = AsciiArt.toAsciiText(
+                grayscaleBitmap = frameResult.grayscaleBitmap,
+                preset = AsciiCharsetPreset.PRINTABLE
+            )
 
-        // Always use grayscale bitmap as display - AsciiGridPreview will overlay colors if enabled
-        val displayBitmap = frameResult.grayscaleBitmap
+            // Always use grayscale bitmap as display - AsciiGridPreview will overlay colors if enabled
+            val displayBitmap = frameResult.grayscaleBitmap
 
-        // Post result back to main thread
-        mainThreadHandler.post {
-            onFrameProcessed(displayBitmap, asciiText, frameResult.asciiColors)
+            // Post result back to main thread
+            mainThreadHandler.post {
+                // Recycle the previously displayed bitmap to prevent memory leak
+                lastDisplayedBitmap?.recycle()
+                lastDisplayedBitmap = displayBitmap
+                onFrameProcessed(displayBitmap, asciiText, frameResult.asciiColors)
+            }
+        } finally {
+            // Clean up the scaled bitmap (it's no longer needed after processing)
+            if (scaledBitmap != bitmap) {
+                scaledBitmap.recycle()
+            }
         }
     }
 
