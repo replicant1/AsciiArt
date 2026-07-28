@@ -72,6 +72,13 @@ class ExoPlayerFrameListener(
         }
     }
 
+    /**
+     * Polls ExoPlayer's playback position every ~16ms to detect when new frames should be extracted.
+     * MUST run on the UI thread because ExoPlayer's API is explicitly designed for main thread access.
+     * This polling is extremely cheap (~1ms per cycle). When a new frame time is detected, it's
+     * queued for processing on a background thread. Heavy work (frame extraction, ASCII processing)
+     * happens async in processFrameQueue() to prevent blocking the UI.
+     */
     private val frameUpdateChecker: Runnable = Runnable {
         if (isProcessing && exoPlayer.isPlaying) {
             val currentTimeMs = exoPlayer.currentPosition

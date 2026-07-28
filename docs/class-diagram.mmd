@@ -12,6 +12,7 @@ classDiagram
         liveBitmap
         liveAsciiText
         liveAsciiColors
+        selectedTab
     }
     
     class CameraAnalysisPipeline {
@@ -30,8 +31,31 @@ classDiagram
         analyze(image: ImageProxy)
     }
     
+    class ExoPlayerVideoFileTab {
+        scaleFactor: Int
+        contrastFactor: Float
+        colorEnabled: Boolean
+        displayMode: AsciiDisplayMode
+    }
+    
+    class ExoPlayerFrameListener {
+        scaleFactorProvider()
+        contrastFactorProvider()
+        colorEnabledProvider()
+        displayModeProvider()
+        onFrameProcessed()
+        startListening()
+        stopListening()
+    }
+    
+    class ExoPlayerFrameCapture {
+        -processFrameQueue()
+        -processFrame(bitmap, frameTimeMs)
+    }
+    
     class ImageProcessor {
         +processLumaFrame()$
+        +processBitmap()$
         -yuvToArgb()$
     }
     
@@ -52,8 +76,13 @@ classDiagram
     
     MainActivity --> AsciiPreviewScreen
     AsciiPreviewScreen --> CameraAnalysisPipeline
+    AsciiPreviewScreen --> ExoPlayerVideoFileTab
     CameraAnalysisPipeline --> CameraFrameAnalyzer
     CameraFrameAnalyzer --> ImageProcessor
+    ExoPlayerVideoFileTab --> ExoPlayerFrameListener
+    ExoPlayerFrameListener --> ExoPlayerFrameCapture
+    ExoPlayerFrameCapture --> ImageProcessor
     ImageProcessor --> FrameProcessingResult
     CameraFrameAnalyzer --> AsciiArt
+    ExoPlayerFrameCapture --> AsciiArt
     AsciiPreviewScreen --> AsciiDisplayMode

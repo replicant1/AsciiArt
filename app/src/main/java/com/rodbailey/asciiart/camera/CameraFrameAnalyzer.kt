@@ -44,9 +44,8 @@ class CameraFrameAnalyzer(
             rotationDegrees = rotationDegrees
         )
         val asciiText = when (displayModeProvider()) {
-            AsciiDisplayMode.IMAGE_ONLY -> ""
-            AsciiDisplayMode.ASCII_OVERLAY,
-            AsciiDisplayMode.ASCII_ONLY -> AsciiArt.toAsciiText(
+            AsciiDisplayMode.IMAGE -> ""
+            AsciiDisplayMode.ASCII -> AsciiArt.toAsciiText(
                 grayscaleBitmap = orientedBitmap,
                 preset = AsciiCharsetPreset.PRINTABLE
             )
@@ -66,6 +65,22 @@ class CameraFrameAnalyzer(
         }
     }
 
+    /**
+     * Rotates the camera frame bitmap to match device display orientation.
+     *
+     * Although the app is locked to portrait orientation, this rotation is necessary
+     * because camera sensors are physically mounted at fixed angles on the device
+     * (typically 90° on most Android phones like the Pixel 3). CameraX reports the
+     * required rotation via imageInfo.rotationDegrees, which represents the angle
+     * needed to align the sensor output with the device's display orientation.
+     *
+     * Without this rotation, the ASCII art would render sideways (rotated 90°)
+     * even though the app UI is locked to portrait.
+     *
+     * @param bitmap The camera frame bitmap to rotate
+     * @param rotationDegrees The rotation angle reported by CameraX (typically 0, 90, 180, or 270)
+     * @return The rotated bitmap, or the original if no rotation is needed (rotationDegrees = 0)
+     */
     private fun rotateBitmapIfNeeded(bitmap: Bitmap, rotationDegrees: Int): Bitmap {
         if (rotationDegrees == 0) {
             return bitmap

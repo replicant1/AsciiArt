@@ -1,11 +1,17 @@
 # ASCII Art
 
 ## What this app does
-This Android app takes live camera input, downsamples it into a coarse grid, and renders that grid as either:
+This Android app provides two input sources for real-time ASCII art generation:
+
+### Live Camera Tab
+Takes live camera input, downsamples it into a coarse grid, and renders that grid as either:
 - a de-res image (`Image` mode), or
 - ASCII art (`ASCII` mode).
 
-It also supports a **Colour** toggle:
+### Video File Tab
+Loads video files from device storage and applies the same ASCII pipeline in real-time.
+
+Both tabs support a **Colour** toggle:
 - **Off:** output is grayscale-based.
 - **On:** each de-res cell is assigned a sampled color, and ASCII glyphs (and Image mode cells) use that color.
 
@@ -13,6 +19,8 @@ It also supports a **Colour** toggle:
 This project was created as an exploration of **GitHub Copilot’s capability** to iteratively design, implement, debug, and refine a non-trivial real-time graphics pipeline in an Android app.
 
 ## High-level graphics pipeline
+
+### Live Camera Pipeline
 1. Acquire camera frames with CameraX `ImageAnalysis` using `KEEP_ONLY_LATEST`.
 2. Read luma (Y) and downsample according to user scale factor.
 3. Apply contrast adjustment to luma values before output mapping.
@@ -21,6 +29,16 @@ This project was created as an exploration of **GitHub Copilot’s capability** 
    - (when Colour is enabled) a per-cell ARGB color grid sampled from YUV.
 5. Rotate processed output to device orientation.
 6. Render either image cells or ASCII cells in Compose.
+
+### Video File Pipeline
+1. Load video file using ExoPlayer 2.19.1.
+2. Poll playback position at ~60Hz to detect new frames.
+3. Extract frames using `MediaMetadataRetriever.getFrameAtTime()`.
+4. Process frames through the same pipeline as live camera:
+   - Downsample according to scale factor
+   - Apply contrast adjustment
+   - Generate grayscale bitmap and optional color grid
+5. Render to UI with real-time parameter responsiveness.
 
 ## ASCII mapping algorithm
 For each de-res cell:
@@ -38,15 +56,19 @@ Character density is computed by rasterizing each candidate printable ASCII char
 Characters are sorted by this density, from sparse (e.g. space) to dense. Grayscale intensity is then mapped across that ordered list.
 
 ## Current controls
-- **Scale factor** slider: controls downsampling resolution.
+- **Scale factor** slider: controls downsampling resolution (2–48×).
 - **Contrast** slider: adjusts contrast before mapping.
-- **Mode chips**: `Image` / `ASCII`.
-- **Colour** toggle: enables per-cell color output.
+- **Mode chips**: `Image` / `ASCII` (radio group, shared across both tabs).
+- **Colour** toggle: enables per-cell color output (affects both Live Camera and Video File).
+- **Tab selector**: switch between Live Camera and Video File input sources.
 
 ## Notes
 - App is portrait-locked.
 - Edge-to-edge/system bar transparency is configured.
 - Camera permission is requested at runtime.
+- Video file must be placed in `/sdcard/Download/` directory.
+- Scale factor and contrast adjustments update in real-time on both tabs.
+- Colour toggle applies dynamically (no need to restart video playback).
 
 ## Architecture Diagrams
 
@@ -166,5 +188,47 @@ classDiagram
     ImageProcessor --> FrameProcessingResult
     CameraFrameAnalyzer --> AsciiArt
     AsciiPreviewScreen --> AsciiDisplayMode
+    AsciiPreviewScreen --> ExoPlayerVideoFileTab
+    ExoPlayerVideoFileTab --> ExoPlayerFrameListener
+    ExoPlayerFrameListener --> ExoPlayerFrameCapture
+    ExoPlayerFrameCapture --> ImageProcessor
+```
+
+### Video File Processing Sequence
+```mermaid
+sequenceDiagram
+    participant UI as ExoPlayerVideoFileTab
+    participant EFL as ExoPlayerFrameListener
+    participant EMR as MediaMetadataRetriever
+    participant IP as ImageProcessor
+    participant AA as AsciiArt
+    
+    UI->>EFL: Create listener with provider lambdas
+    EFL->>EFL: Start polling at ~60Hz
+    EFL->>EMR: getFrameAtTime(timeMs)
+    EMR-->>EFL: Bitmap at timeMs
+    EFL->>IP: processBitmap(bitmap, scaleFactor, contrastFactor)
+    IP-->>EFL: FrameProcessingResult (grayscale, colors)
+    EFL->>AA: toAsciiText(grayscaleBitmap)
+    AA-->>EFL: ASCII text
+    EFL->>UI: onFrameProcessed(displayBitmap, asciiText, colors)
+    UI->>UI: Render to AsciiGridPreview
+```
+
+### Shared Parameter Update Flow
+```mermaid
+sequenceDiagram
+    participant APS as AsciiPreviewScreen
+    participant VFP as VideoFilePlayer
+    participant EFC as ExoPlayerFrameCapture
+    participant RUS as rememberUpdatedState
+    
+    APS->>VFP: scaleFactor changes (recompose)
+    VFP->>RUS: currentScaleFactor.value = scaleFactor
+    Note over RUS: Value holder updated
+    VFP->>EFC: scaleFactorProvider() returns current value
+    EFC->>EFC: Next frame uses updated scale factor
+    EFC->>VFP: onFrameProcessed(reprocessed frame)
+    VFP->>VFP: Render updated ASCII display
 ```
 

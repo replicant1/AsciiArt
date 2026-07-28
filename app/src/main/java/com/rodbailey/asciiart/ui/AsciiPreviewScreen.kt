@@ -69,7 +69,7 @@ fun AsciiPreviewScreen() {
     var scaleFactor by remember { mutableIntStateOf(8) }
     var contrastFactor by remember { mutableFloatStateOf(1.0f) }
     var colorEnabled by remember { mutableStateOf(false) }
-    var displayMode by remember { mutableStateOf(AsciiDisplayMode.IMAGE_ONLY) }
+    var displayMode by remember { mutableStateOf(AsciiDisplayMode.IMAGE) }
     
     // Tab selection state
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -227,7 +227,7 @@ private fun CameraTabContent(
         val liveBitmapValue = liveBitmap
         if (liveBitmapValue != null) {
             when (displayMode) {
-                AsciiDisplayMode.IMAGE_ONLY -> {
+                AsciiDisplayMode.IMAGE -> {
                     ImagePreview(
                         bitmap = liveBitmapValue,
                         modifier = Modifier
@@ -236,20 +236,7 @@ private fun CameraTabContent(
                     )
                 }
 
-                AsciiDisplayMode.ASCII_OVERLAY -> {
-                    AsciiGridPreview(
-                        bitmap = liveBitmapValue,
-                        asciiText = liveAsciiText,
-                        asciiColors = liveAsciiColors,
-                        colorEnabled = colorEnabled,
-                        drawSourceImage = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                    )
-                }
-
-                AsciiDisplayMode.ASCII_ONLY -> {
+                AsciiDisplayMode.ASCII -> {
                     AsciiGridPreview(
                         bitmap = liveBitmapValue,
                         asciiText = liveAsciiText,
@@ -315,15 +302,15 @@ private fun DisplayModeChipBar(
             )
             val chipBorder = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             FilterChip(
-                selected = displayMode == AsciiDisplayMode.IMAGE_ONLY,
-                onClick = { onDisplayModeChange(AsciiDisplayMode.IMAGE_ONLY) },
+                selected = displayMode == AsciiDisplayMode.IMAGE,
+                onClick = { onDisplayModeChange(AsciiDisplayMode.IMAGE) },
                 label = { Text(stringResource(R.string.ascii_preview_image_button)) },
                 colors = chipColors,
                 border = chipBorder
             )
             FilterChip(
-                selected = displayMode == AsciiDisplayMode.ASCII_ONLY,
-                onClick = { onDisplayModeChange(AsciiDisplayMode.ASCII_ONLY) },
+                selected = displayMode == AsciiDisplayMode.ASCII,
+                onClick = { onDisplayModeChange(AsciiDisplayMode.ASCII) },
                 label = { Text(stringResource(R.string.ascii_preview_ascii_button)) },
                 colors = chipColors,
                 border = chipBorder
