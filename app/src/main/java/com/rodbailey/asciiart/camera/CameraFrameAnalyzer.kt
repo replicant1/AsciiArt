@@ -82,7 +82,8 @@ class CameraFrameAnalyzer(
             matrix,
             true
         )
-        bitmap.recycle()
+        // Don't recycle bitmap here - it may still be rendered by Compose
+        // Let garbage collection handle cleanup
         return rotatedBitmap
     }
 

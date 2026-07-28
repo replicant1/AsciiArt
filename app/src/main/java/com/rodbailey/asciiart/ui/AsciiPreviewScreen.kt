@@ -367,16 +367,14 @@ private fun CameraAnalysisPipeline(
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
 
-        analysisUseCase.setAnalyzer(
-            analysisExecutor,
-            CameraFrameAnalyzer(
-                scaleFactorProvider = { currentScaleFactor },
-                contrastFactorProvider = { currentContrastFactor },
-                colorEnabledProvider = { currentColorEnabled },
-                displayModeProvider = { currentDisplayMode },
-                onFrameProcessed = currentFrameCallback
-            )
+        val frameAnalyzer = CameraFrameAnalyzer(
+            scaleFactorProvider = { currentScaleFactor },
+            contrastFactorProvider = { currentContrastFactor },
+            colorEnabledProvider = { currentColorEnabled },
+            displayModeProvider = { currentDisplayMode },
+            onFrameProcessed = currentFrameCallback
         )
+        analysisUseCase.setAnalyzer(analysisExecutor, frameAnalyzer)
 
         cameraProviderFuture.addListener(
             {
