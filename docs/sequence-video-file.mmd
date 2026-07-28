@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant UI as ExoPlayerVideoFileTab
+    participant EFL as ExoPlayerFrameListener
+    participant EMR as MediaMetadataRetriever
+    participant IP as ImageProcessor
+    participant AA as AsciiArt
+    
+    UI->>EFL: Create listener with provider lambdas
+    EFL->>EFL: Start polling at ~60Hz (frameUpdateChecker)
+    loop Every 16ms
+        EFL->>EFL: Check exoPlayer.currentPosition()
+        alt Time advanced >= 30ms
+            EFL->>EFL: Offer frame time to queue
+            EFL->>EMR: getFrameAtTime(timeMs)
+            EMR-->>EFL: Bitmap at timeMs
+            EFL->>IP: processBitmap(bitmap, scaleFactor, contrastFactor)
+            IP-->>EFL: FrameProcessingResult (grayscale, colors)
+            EFL->>AA: toAsciiText(grayscaleBitmap)
+            AA-->>EFL: ASCII text
+            EFL->>UI: onFrameProcessed(displayBitmap, asciiText, colors)
+            UI->>UI: Render to AsciiGridPreview
+        end
+    end
