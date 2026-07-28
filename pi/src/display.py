@@ -66,7 +66,7 @@ class NcursesDisplay:
     
     def render(self, ascii_lines):
         """
-        Render ASCII art to terminal.
+        Render ASCII art to terminal (thread-safe).
         
         Args:
             ascii_lines: List of strings (one per row)
@@ -84,18 +84,19 @@ class NcursesDisplay:
                         break
                     
                     # Truncate line to terminal width
-                    truncated = line[:self.max_width]
+                    truncated = line[:self.max_width - 1] if len(line) > self.max_width - 1 else line
                     
                     try:
                         self.stdscr.addstr(row, 0, truncated)
-                    except curses.error:
+                    except curses.error as e:
                         # Can happen if writing at edge of terminal
+                        logger.debug(f"Curses error rendering row {row}: {e}")
                         pass
                 
                 # Draw info line at bottom
                 info = f"ASCII Art - Camera Live Preview | q to quit"
-                if len(info) > self.max_width:
-                    info = info[:self.max_width - 1]
+                if len(info) > self.max_width - 1:
+                    info = info[:self.max_width - 2]
                 
                 try:
                     self.stdscr.addstr(
@@ -103,7 +104,8 @@ class NcursesDisplay:
                         info, 
                         curses.A_REVERSE
                     )
-                except curses.error:
+                except curses.error as e:
+                    logger.debug(f"Curses error rendering info: {e}")
                     pass
                 
                 self.stdscr.refresh()
@@ -113,7 +115,7 @@ class NcursesDisplay:
     
     def get_key(self):
         """
-        Get user input without blocking.
+        Get user input without blocking (thread-safe).
         
         Returns:
             Character code if key pressed, None otherwise
@@ -121,13 +123,15 @@ class NcursesDisplay:
         if not self.initialized or not self.stdscr:
             return None
         
-        try:
-            ch = self.stdscr.getch()
-            if ch == curses.ERR:
+        with self.lock:
+            try:
+                ch = self.stdscr.getch()
+                if ch == curses.ERR:
+                    return None
+                return chr(ch) if ch < 256 else None
+            except Exception as e:
+                logger.debug(f"Error getting key: {e}")
                 return None
-            return chr(ch) if ch < 256 else None
-        except:
-            return None
     
     def cleanup(self):
         """Clean up ncurses and restore terminal."""

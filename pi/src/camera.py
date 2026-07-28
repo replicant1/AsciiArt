@@ -59,8 +59,14 @@ class CameraCapture:
         """Continuously capture frames and queue them."""
         while self.is_running:
             try:
-                # Capture frame as array
+                # Capture frame as numpy array in YUV420 format
+                # picamera2.capture_array() returns a numpy array with shape (height, width, planes)
+                # For YUV420: returns as a 2D array, need to flatten for processing
                 frame = self.picam2.capture_array()
+                
+                # Ensure frame is flattened if multi-dimensional
+                if frame.ndim > 1:
+                    frame = frame.flatten()
                 
                 # Drop oldest frame if queue is full (non-blocking)
                 if self.frame_queue.full():
@@ -82,7 +88,8 @@ class CameraCapture:
             timeout: Timeout in seconds to wait for frame
             
         Returns:
-            Numpy array of frame data, or None if timeout
+            Tuple of (frame_data, frame_shape) where frame_data is 1D array
+            and frame_shape is (height, width) of original image
         """
         try:
             return self.frame_queue.get(timeout=timeout)

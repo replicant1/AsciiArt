@@ -147,28 +147,68 @@ class ImageProcessor:
         """
         Full processing pipeline: YUV420 -> RGB -> Grayscale -> Rotate -> Scale -> Contrast.
         
+        NOTE: Rotation is applied after grayscale but before scaling for efficiency.
+        
         Args:
-            frame_data: YUV420 numpy array
-            width: Frame width
-            height: Frame height
-            rotation_degrees: Camera rotation
+            frame_data: YUV420 numpy array (flattened 1D)
+            width: Original frame width in pixels
+            height: Original frame height in pixels
+            rotation_degrees: Camera rotation (0, 90, 180, 270)
             
         Returns:
             Processed grayscale numpy array ready for ASCII conversion
         """
-        # YUV420 -> RGB
-        rgb = self.process_yuv420(frame_data, width, height)
+        try:
+            # Validate frame size
+            expected_size = width * height + (width * height) // 2  # Y + U + V
+            if frame_data.size != expected_size:
+                logger.warning(f"Frame size mismatch: expected {expected_size}, got {frame_data.size}")
+                # Try to handle anyway
+            
+            # YUV420 -> RGB
+            rgb = self.process_yuv420(frame_data, width, height)
+            
+            # RGB -> Grayscale
+            gray = self.to_grayscale(rgb)
+            
+            # Apply rotation (if needed for camera orientation)
+            # Must rotate before scaling to maintain aspect ratio
+            rotated = self.rotate_if_needed(gray, rotation_degrees)
+            
+            # Scale down for ASCII processing
+            scaled = self.scale_down(rotated)
+            
+            # Adjust contrast
+            adjusted = self.adjust_contrast(scaled)
+            
+            return adjusted
+            
+        except Exception as e:
+            logger.error(f"Error in process_frame: {e}")
+            raise
+    
+    def get_processed_dimensions(self, original_height, original_width, rotation_degrees=90):
+        """
+        Calculate processed frame dimensions after rotation and scaling.
         
-        # RGB -> Grayscale
-        gray = self.to_grayscale(rgb)
+        Args:
+            original_height: Original height before rotation
+            original_width: Original width before rotation
+            rotation_degrees: Rotation in degrees
+            
+        Returns:
+            Tuple of (output_height, output_width) after all processing
+        """
+        # After rotation, dimensions may swap
+        if rotation_degrees in [90, 270]:
+            rotated_height = original_width
+            rotated_width = original_height
+        else:
+            rotated_height = original_height
+            rotated_width = original_width
         
-        # Apply rotation (if needed for camera orientation)
-        rotated = self.rotate_if_needed(gray, rotation_degrees)
+        # After scaling
+        scaled_height = max(1, rotated_height // self.scale_factor)
+        scaled_width = max(1, rotated_width // self.scale_factor)
         
-        # Scale down
-        scaled = self.scale_down(rotated)
-        
-        # Adjust contrast
-        adjusted = self.adjust_contrast(scaled)
-        
-        return adjusted
+        return scaled_height, scaled_width

@@ -113,6 +113,11 @@ class AsciiArtLiveCamera:
                     logger.error(f"Error processing frame: {e}")
                     continue
                 
+                # Verify we got a valid processed frame
+                if processed is None or processed.size == 0:
+                    logger.warning("Processed frame is empty")
+                    continue
+                
                 # Convert to ASCII art
                 try:
                     ascii_lines = self.ascii_art.to_ascii_text(processed)
@@ -137,7 +142,7 @@ class AsciiArtLiveCamera:
                 self.frame_count += 1
                 if self.frame_count % 30 == 0:  # Log every 30 frames
                     elapsed = time.time() - self.start_time
-                    actual_fps = self.frame_count / elapsed
+                    actual_fps = self.frame_count / elapsed if elapsed > 0 else 0
                     logger.info(f"Frames: {self.frame_count} | FPS: {actual_fps:.1f}")
         
         except KeyboardInterrupt:
