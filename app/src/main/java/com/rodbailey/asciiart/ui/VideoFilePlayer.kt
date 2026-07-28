@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,7 +50,12 @@ fun ExoPlayerVideoFileTab(
     var asciiColors by remember { mutableStateOf<IntArray?>(null) }
     var frameCount by remember { mutableStateOf(0) }
 
-    // Wrap state updates in rememberUpdatedState so callback always references current state
+    // Wrap state updates AND parameters in rememberUpdatedState so callbacks/lambdas always reference current values
+    val currentScaleFactor = rememberUpdatedState(scaleFactor)
+    val currentContrastFactor = rememberUpdatedState(contrastFactor)
+    val currentColorEnabled = rememberUpdatedState(colorEnabled)
+    val currentDisplayMode = rememberUpdatedState(displayMode)
+    
     val currentBitmapSetter = rememberUpdatedState { bitmap: Bitmap? ->
         videoBitmap = bitmap
     }
@@ -76,10 +82,10 @@ fun ExoPlayerVideoFileTab(
         val listener = ExoPlayerFrameListener(
             exoPlayer = player,
             videoUri = TEST_VIDEO_PATH.removePrefix("file://"),
-            scaleFactorProvider = { scaleFactor },
-            contrastFactorProvider = { contrastFactor },
-            colorEnabledProvider = { colorEnabled },
-            displayModeProvider = { displayMode },
+            scaleFactorProvider = { currentScaleFactor.value },
+            contrastFactorProvider = { currentContrastFactor.value },
+            colorEnabledProvider = { currentColorEnabled.value },
+            displayModeProvider = { currentDisplayMode.value },
             frameSkipRate = 2,  // Process every 2nd rendered frame
             onFrameProcessed = { bitmap, ascii, colors ->
                 currentBitmapSetter.value(bitmap)
