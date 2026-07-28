@@ -2,13 +2,18 @@ package com.rodbailey.asciiart.processing
 
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.Renderer
 import com.google.android.exoplayer2.video.VideoRendererEventListener
-import java.util.concurrent.LinkedBlockingQueue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val TAG = "ExoPlayerFrameListener"
 
@@ -31,10 +36,8 @@ class ExoPlayerFrameListener(
     ) -> Unit
 ) {
 
-    private val mainThreadHandler = Handler(Looper.getMainLooper())
-    private var processingThread: Thread? = null
-    private var isProcessing = false
-    private val frameQueue = LinkedBlockingQueue<Long>(10)  // Max 10 pending frame times
+    private val scope = CoroutineScope(Job() + Dispatchers.Main.immediate)
+    private val frameQueue = Channel<Long>(10)  // Max 10 pending frame times
     private var lastProcessedTimeMs = 0L
     private var renderedFrameCount = 0
     private var lastQueuedTimeMs = 0L
@@ -43,22 +46,59 @@ class ExoPlayerFrameListener(
     private val retriever by lazy { MediaMetadataRetriever().apply { setDataSource(videoUri) } }
 
     fun startListening() {
-        if (isProcessing) return
-        isProcessing = true
+        // Launch polling coroutine on main thread
+        scope.launch(Dispatchers.Main) {
+            while (true) {
+                if (exoPlayer.isPlaying) {
+                    val currentTimeMs = exoPlayer.currentPosition
+                    
+                    // Detect playback restart (position reset)
+                    if (currentTimeMs < lastQueuedTimeMs - 1000) {
+                        lastQueuedTimeMs = 0
+                        lastProcessedTimeMs = 0
+                        renderedFrameCount = 0
+                    }
+                    
+                    // Queue frame if time has advanced significantly
+                    if (currentTimeMs > lastQueuedTimeMs + 30) {  // At least 30ms between frames
+                        renderedFrameCount++
+                        if (renderedFrameCount % frameSkipRate == 0) {
+                            try {
+                                frameQueue.send(currentTimeMs)
+                                lastQueuedTimeMs = currentTimeMs
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error queuing frame", e)
+                            }
+                        }
+                    }
+                }
+                delay(16)  // ~60Hz polling
+            }
+        }
         
-        // Use a polling approach to check for frame updates
-        mainThreadHandler.post(frameUpdateChecker)
-        
-        processingThread = Thread { processFrameQueue() }.apply {
-            name = "ExoPlayerFrameProcessor"
-            start()
+        // Launch frame processing coroutine on IO dispatcher
+        scope.launch(Dispatchers.IO) {
+            for (frameTimeMs in frameQueue) {
+                try {
+                    // Allow re-processing of same frame (for parameter changes) OR new frames with enough time passed
+                    val shouldProcess = (frameTimeMs == lastProcessedTimeMs) || (frameTimeMs > lastProcessedTimeMs + 50)
+                    if (shouldProcess) {
+                        lastProcessedTimeMs = frameTimeMs
+                        val frameTimeUs = frameTimeMs * 1000
+                        val bitmap = retriever.getFrameAtTime(frameTimeUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                        if (bitmap != null) {
+                            processFrame(bitmap, frameTimeMs)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in frame processing", e)
+                }
+            }
         }
     }
 
     fun stopListening() {
-        isProcessing = false
-        mainThreadHandler.removeCallbacks(frameUpdateChecker)
-        processingThread?.join(2000)
+        scope.cancel()
     }
 
     fun release() {
@@ -72,67 +112,7 @@ class ExoPlayerFrameListener(
         }
     }
 
-    /**
-     * Polls ExoPlayer's playback position every ~16ms to detect when new frames should be extracted.
-     * MUST run on the UI thread because ExoPlayer's API is explicitly designed for main thread access.
-     * This polling is extremely cheap (~1ms per cycle). When a new frame time is detected, it's
-     * queued for processing on a background thread. Heavy work (frame extraction, ASCII processing)
-     * happens async in processFrameQueue() to prevent blocking the UI.
-     */
-    private val frameUpdateChecker: Runnable = Runnable {
-        if (isProcessing && exoPlayer.isPlaying) {
-            val currentTimeMs = exoPlayer.currentPosition
-            
-            // Detect playback restart (position reset)
-            if (currentTimeMs < lastQueuedTimeMs - 1000) {
-                lastQueuedTimeMs = 0
-                lastProcessedTimeMs = 0
-                renderedFrameCount = 0
-            }
-            
-            // Queue frame if time has advanced significantly
-            if (currentTimeMs > lastQueuedTimeMs + 30) {  // At least 30ms between frames
-                renderedFrameCount++
-                if (renderedFrameCount % frameSkipRate == 0) {
-                    try {
-                        frameQueue.offer(currentTimeMs)  // Non-blocking offer
-                        lastQueuedTimeMs = currentTimeMs
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error queuing frame", e)
-                    }
-                }
-            }
-        }
-        
-        if (isProcessing) {
-            mainThreadHandler.postDelayed(frameUpdateChecker, 16)  // ~60Hz polling
-        }
-    }
-
-    private fun processFrameQueue() {
-        while (isProcessing) {
-            try {
-                // Wait for next frame time (max 100ms to check isProcessing)
-                val frameTimeMs = frameQueue.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS)
-                if (frameTimeMs != null) {
-                    // Allow re-processing of same frame (for parameter changes) OR new frames with enough time passed
-                    val shouldProcess = (frameTimeMs == lastProcessedTimeMs) || (frameTimeMs > lastProcessedTimeMs + 50)
-                    if (shouldProcess) {
-                        lastProcessedTimeMs = frameTimeMs
-                        val frameTimeUs = frameTimeMs * 1000
-                        val bitmap = retriever.getFrameAtTime(frameTimeUs, MediaMetadataRetriever.OPTION_CLOSEST)
-                        if (bitmap != null) {
-                            processFrame(bitmap, frameTimeMs)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in frame processing queue", e)
-            }
-        }
-    }
-
-    private fun processFrame(bitmap: Bitmap, frameTimeMs: Long) {
+    private suspend fun processFrame(bitmap: Bitmap, frameTimeMs: Long) {
         val colorEnabled = colorEnabledProvider()
         
         // Create a reduced-size bitmap for ASCII processing
@@ -159,7 +139,7 @@ class ExoPlayerFrameListener(
             val displayBitmap = frameResult.grayscaleBitmap
 
             // Post result back to main thread
-            mainThreadHandler.post {
+            withContext(Dispatchers.Main) {
                 // Recycle the previously displayed bitmap to prevent memory leak
                 lastDisplayedBitmap?.recycle()
                 lastDisplayedBitmap = displayBitmap
@@ -179,4 +159,3 @@ class ExoPlayerFrameListener(
         return bitmap
     }
 }
-
