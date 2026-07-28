@@ -108,13 +108,14 @@ class ExoPlayerFrameListener(
                 // Wait for next frame time (max 100ms to check isProcessing)
                 val frameTimeMs = frameQueue.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS)
                 if (frameTimeMs != null) {
-                    // Only process if enough time has passed (avoid re-processing same frame)
-                    if (frameTimeMs > lastProcessedTimeMs + 50) {
+                    // Allow re-processing of same frame (for parameter changes) OR new frames with enough time passed
+                    val shouldProcess = (frameTimeMs == lastProcessedTimeMs) || (frameTimeMs > lastProcessedTimeMs + 50)
+                    if (shouldProcess) {
                         lastProcessedTimeMs = frameTimeMs
                         val frameTimeUs = frameTimeMs * 1000
                         val bitmap = retriever.getFrameAtTime(frameTimeUs, MediaMetadataRetriever.OPTION_CLOSEST)
                         if (bitmap != null) {
-                            processFrame(bitmap)
+                            processFrame(bitmap, frameTimeMs)
                         }
                     }
                 }
@@ -124,7 +125,7 @@ class ExoPlayerFrameListener(
         }
     }
 
-    private fun processFrame(bitmap: Bitmap) {
+    private fun processFrame(bitmap: Bitmap, frameTimeMs: Long) {
         val colorEnabled = colorEnabledProvider()
         
         // Create a reduced-size bitmap for ASCII processing
