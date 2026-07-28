@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    id("jacoco")
 }
 
 android {
@@ -35,6 +36,10 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testCoverage {
+        jacocoVersion = "0.8.8"
+    }
 }
 
 dependencies {
@@ -58,4 +63,8 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+}
+
+jacoco {
+    toolVersion = "0.8.8"
 }
