@@ -23,7 +23,7 @@ Camera Thread              Main Thread           Display Thread
     |                          |                      |
     v                          |                      |
 Capture Frame --queue--> Process --queue--> Render to Terminal
-    |                    (YUV→Gray)             (ncurses)
+    |                    (YUV→Gray)             (curses/ncurses)
     |                      |
     |              Scale + Contrast
     |                      |
@@ -35,6 +35,11 @@ Capture Frame --queue--> Process --queue--> Render to Terminal
                       (continuous)
 ```
 
+**Display Technology:**
+- Uses Python's built-in `curses` module (wrapper around C ncurses library)
+- ncurses must be installed at system level: `libncurses5-dev`
+- Python's curses is available on all Unix/Linux systems (no pip install)
+
 ## Hardware Requirements
 
 - Raspberry Pi Zero 2 W or better
@@ -44,22 +49,49 @@ Capture Frame --queue--> Process --queue--> Render to Terminal
 
 ## Software Setup
 
-### 1. Install Dependencies
+### Quick Start (Automated)
+
+Run the setup script to install all dependencies:
+
+```bash
+cd /pi
+bash setup.sh
+```
+
+The script will:
+1. Install system dependencies (including ncurses)
+2. Install Python dependencies
+3. Check camera connectivity
+4. Report setup status
+
+### Manual Setup
+
+**Step 1: Install System Dependencies**
+
+ncurses is a C library required by Python's `curses` module:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y python3-pip python3-libcamera python3-picamera2
+sudo apt-get install -y libncurses5-dev python3-pip python3-libcamera python3-picamera2
+```
+
+**Note:** Python's built-in `curses` module is a wrapper around ncurses. No pip install needed for curses itself.
+
+**Step 2: Install Python Dependencies**
+
+```bash
+cd /pi
 pip3 install -r requirements.txt
 ```
 
-### 2. Enable Camera
+**Step 3: Enable Camera**
 
 ```bash
 sudo raspi-config
 # Navigate to: Interface Options > Camera > Enable
 ```
 
-### 3. Run Application
+### Running the Application
 
 ```bash
 cd /pi
