@@ -45,8 +45,6 @@ class ExoPlayerFrameListener(
         if (isProcessing) return
         isProcessing = true
         
-        Log.i(TAG, "startListening() called - video URI: $videoUri")
-        
         // Use a polling approach to check for frame updates
         mainThreadHandler.post(frameUpdateChecker)
         
@@ -54,14 +52,12 @@ class ExoPlayerFrameListener(
             name = "ExoPlayerFrameProcessor"
             start()
         }
-        Log.i(TAG, "Frame listener started (skip rate: $frameSkipRate)")
     }
 
     fun stopListening() {
         isProcessing = false
         mainThreadHandler.removeCallbacks(frameUpdateChecker)
         processingThread?.join(2000)
-        Log.d(TAG, "Frame listener stopped (processed ~$renderedFrameCount frames)")
     }
 
     fun release() {
@@ -76,6 +72,13 @@ class ExoPlayerFrameListener(
     private val frameUpdateChecker: Runnable = Runnable {
         if (isProcessing && exoPlayer.isPlaying) {
             val currentTimeMs = exoPlayer.currentPosition
+            
+            // Detect playback restart (position reset)
+            if (currentTimeMs < lastQueuedTimeMs - 1000) {
+                lastQueuedTimeMs = 0
+                lastProcessedTimeMs = 0
+                renderedFrameCount = 0
+            }
             
             // Queue frame if time has advanced significantly
             if (currentTimeMs > lastQueuedTimeMs + 30) {  // At least 30ms between frames
@@ -131,29 +134,17 @@ class ExoPlayerFrameListener(
         val frameResult = ImageProcessor.processBitmap(
             bitmap = scaledBitmap,
             contrastFactor = contrastFactorProvider(),
-            colorEnabled = colorEnabled
+            colorEnabled = true  // Always generate colors for flexibility
         )
 
-        // Generate ASCII text
-        val asciiText = when (displayModeProvider()) {
-            AsciiDisplayMode.IMAGE_ONLY -> ""
-            AsciiDisplayMode.ASCII_OVERLAY,
-            AsciiDisplayMode.ASCII_ONLY -> AsciiArt.toAsciiText(
-                grayscaleBitmap = frameResult.grayscaleBitmap,
-                preset = AsciiCharsetPreset.PRINTABLE
-            )
-        }
+        // Generate ASCII text (always, regardless of display mode)
+        val asciiText = AsciiArt.toAsciiText(
+            grayscaleBitmap = frameResult.grayscaleBitmap,
+            preset = AsciiCharsetPreset.PRINTABLE
+        )
 
-        // Create display bitmap
-        val displayBitmap = if (colorEnabled && frameResult.asciiColors != null) {
-            bitmapFromColorGrid(
-                colors = frameResult.asciiColors,
-                width = frameResult.grayscaleBitmap.width,
-                height = frameResult.grayscaleBitmap.height
-            )
-        } else {
-            frameResult.grayscaleBitmap
-        }
+        // Always use grayscale bitmap as display - AsciiGridPreview will overlay colors if enabled
+        val displayBitmap = frameResult.grayscaleBitmap
 
         // Post result back to main thread
         mainThreadHandler.post {

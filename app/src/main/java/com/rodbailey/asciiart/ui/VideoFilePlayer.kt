@@ -16,6 +16,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,18 +42,28 @@ fun ExoPlayerVideoFileTab(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
+     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
     var frameListener by remember { mutableStateOf<ExoPlayerFrameListener?>(null) }
     var videoBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var asciiText by remember { mutableStateOf("") }
     var asciiColors by remember { mutableStateOf<IntArray?>(null) }
-    var showVideo by remember { mutableStateOf(true) }
     var frameCount by remember { mutableStateOf(0) }
 
-    Log.i(TAG, "ExoPlayerVideoFileTab composable rendering")
+    // Wrap state updates in rememberUpdatedState so callback always references current state
+    val currentBitmapSetter = rememberUpdatedState { bitmap: Bitmap? ->
+        videoBitmap = bitmap
+    }
+    val currentTextSetter = rememberUpdatedState { text: String ->
+        asciiText = text
+    }
+    val currentColorsSetter = rememberUpdatedState { colors: IntArray? ->
+        asciiColors = colors
+    }
+    val currentFrameCounter = rememberUpdatedState {
+        frameCount++
+    }
 
     DisposableEffect(Unit) {
-        Log.i(TAG, "DisposableEffect: Initializing ExoPlayer")
         val player = ExoPlayer.Builder(context).build()
         exoPlayer = player
 
@@ -62,7 +73,6 @@ fun ExoPlayerVideoFileTab(
         player.prepare()
 
         // Create and start frame listener
-        Log.i(TAG, "Creating ExoPlayerFrameListener...")
         val listener = ExoPlayerFrameListener(
             exoPlayer = player,
             videoUri = TEST_VIDEO_PATH.removePrefix("file://"),
@@ -72,23 +82,18 @@ fun ExoPlayerVideoFileTab(
             displayModeProvider = { displayMode },
             frameSkipRate = 2,  // Process every 2nd rendered frame
             onFrameProcessed = { bitmap, ascii, colors ->
-                videoBitmap = bitmap
-                asciiText = ascii
-                asciiColors = colors
-                frameCount++
-                Log.i(TAG, "Frame processed: #$frameCount")
+                currentBitmapSetter.value(bitmap)
+                currentTextSetter.value(ascii)
+                currentColorsSetter.value(colors)
+                currentFrameCounter.value()
             }
         )
         frameListener = listener
-        Log.i(TAG, "Starting frame listener...")
         listener.startListening()
 
         player.play()
 
-        Log.i(TAG, "ExoPlayer initialized with video: $TEST_VIDEO_PATH")
-
         onDispose {
-            Log.i(TAG, "Disposing ExoPlayer and frame listener")
             listener.release()
             player.release()
             exoPlayer = null
@@ -97,22 +102,10 @@ fun ExoPlayerVideoFileTab(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // Toggle button
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Button(
-                onClick = { showVideo = !showVideo },
-                modifier = Modifier.align(Alignment.Center)
-            ) {
-                Text(if (showVideo) "Show ASCII" else "Show Video")
-            }
-        }
-
-        // Display content
-        if (showVideo) {
+        // Display content - determine what to show based on displayMode
+        val showAscii = displayMode != AsciiDisplayMode.IMAGE_ONLY
+        
+        if (!showAscii) {
             // Video display (ExoPlayer handles rendering)
             exoPlayer?.let {
                 AndroidView(

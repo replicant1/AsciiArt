@@ -134,8 +134,6 @@ fun AsciiPreviewScreen() {
         }
         
         // Tab Selection
-        // Temporarily commented out - only showing Video File tab
-        /*
         TabRow(selectedTabIndex = selectedTab) {
             Tab(
                 selected = selectedTab == 0,
@@ -148,7 +146,6 @@ fun AsciiPreviewScreen() {
                 text = { Text("Video File") }
             )
         }
-        */
         
         // Content Area (switches based on selected tab)
         Column(
@@ -157,8 +154,6 @@ fun AsciiPreviewScreen() {
                 .weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            // Temporarily showing only Video File tab
-            /*
             when (selectedTab) {
                 0 -> {
                     // Camera tab
@@ -190,7 +185,6 @@ fun AsciiPreviewScreen() {
                 }
                 
                 1 -> {
-            */
                     // Video file tab
                     VideoFileTabContent(
                         scaleFactor = scaleFactor,
@@ -199,10 +193,8 @@ fun AsciiPreviewScreen() {
                         displayMode = displayMode,
                         modifier = Modifier.weight(1f)
                     )
-            /*
                 }
             }
-            */
         }
     }
 }
@@ -315,23 +307,25 @@ private fun DisplayModeChipBar(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val transparentChipColors = FilterChipDefaults.filterChipColors(
-                containerColor = Color.Transparent,
-                selectedContainerColor = Color.Transparent
+            val chipColors = FilterChipDefaults.filterChipColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                labelColor = MaterialTheme.colorScheme.onSurface
             )
-            val chipBorder = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+            val chipBorder = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             FilterChip(
                 selected = displayMode == AsciiDisplayMode.IMAGE_ONLY,
                 onClick = { onDisplayModeChange(AsciiDisplayMode.IMAGE_ONLY) },
                 label = { Text(stringResource(R.string.ascii_preview_image_button)) },
-                colors = transparentChipColors,
+                colors = chipColors,
                 border = chipBorder
             )
             FilterChip(
                 selected = displayMode == AsciiDisplayMode.ASCII_ONLY,
                 onClick = { onDisplayModeChange(AsciiDisplayMode.ASCII_ONLY) },
                 label = { Text(stringResource(R.string.ascii_preview_ascii_button)) },
-                colors = transparentChipColors,
+                colors = chipColors,
                 border = chipBorder
             )
         }
