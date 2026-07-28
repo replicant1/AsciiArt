@@ -156,18 +156,5 @@ fun ExoPlayerVideoFileTab(
                 }
             }
         }
-
-        // Frame counter
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Text(
-                "Frames processed: $frameCount",
-                modifier = Modifier.align(Alignment.Center),
-                style = MaterialTheme.typography.labelSmall
-            )
-        }
     }
 }
