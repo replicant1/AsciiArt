@@ -109,7 +109,7 @@ fun ExoPlayerVideoFileTab(
 
     Column(modifier = modifier.fillMaxSize()) {
         // Display content - determine what to show based on displayMode
-        val showAscii = displayMode != AsciiDisplayMode.IMAGE_ONLY
+        val showAscii = displayMode != AsciiDisplayMode.IMAGE
         
         if (!showAscii) {
             // Video display (ExoPlayer handles rendering)
@@ -145,7 +145,7 @@ fun ExoPlayerVideoFileTab(
                     asciiText = asciiText,
                     asciiColors = asciiColors,
                     colorEnabled = colorEnabled,
-                    drawSourceImage = displayMode == AsciiDisplayMode.ASCII_OVERLAY,
+                    drawSourceImage = false,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)

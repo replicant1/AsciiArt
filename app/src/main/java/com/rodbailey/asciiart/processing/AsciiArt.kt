@@ -9,9 +9,8 @@ import android.graphics.Typeface
 import kotlin.math.roundToInt
 
 enum class AsciiDisplayMode {
-    IMAGE_ONLY,
-    ASCII_OVERLAY,
-    ASCII_ONLY
+    IMAGE,
+    ASCII
 }
 
 enum class AsciiCharsetPreset {
@@ -25,6 +24,22 @@ object AsciiArt {
     private const val densityGridHeight = 24
     private const val densityTextSizePx = 20f
 
+    /**
+     * Converts a grayscale bitmap to ASCII text.
+     *
+     * For each pixel in the input bitmap:
+     * 1. Reads the grayscale intensity (0–255)
+     * 2. Maps intensity to a character from a density-sorted character set
+     * 3. Builds a string where each character represents the intensity of its corresponding pixel
+     *
+     * The sorted character set ensures sparse characters (e.g., space) represent dark areas,
+     * and dense characters (e.g., #) represent bright areas, creating a visual ASCII representation
+     * of the original grayscale image.
+     *
+     * @param grayscaleBitmap The input grayscale bitmap (expected to be a small de-res grid, e.g., 32×18 pixels)
+     * @param preset The character set to use (PRINTABLE or EXTENDED ASCII)
+     * @return A multi-line ASCII string with dimensions matching the input bitmap
+     */
     fun toAsciiText(grayscaleBitmap: Bitmap, preset: AsciiCharsetPreset): String {
         val sortedChars = sortedCharsetCache.getOrPut(preset) {
             buildCharacterSet(preset).sortedBy { measureVisualDensity(it) }
