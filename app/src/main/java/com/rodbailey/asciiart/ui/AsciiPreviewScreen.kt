@@ -112,8 +112,8 @@ fun AsciiPreviewScreen() {
             )
             Slider(
                 value = scaleFactor.toFloat(),
-                onValueChange = { scaleFactor = it.roundToInt().coerceIn(2, 24) },
-                valueRange = 2f..24f
+                onValueChange = { scaleFactor = it.roundToInt().coerceIn(2, 48) },
+                valueRange = 2f..48f
             )
             Text(
                 stringResource(R.string.ascii_preview_contrast_label, (contrastFactor * 100f).roundToInt()),
