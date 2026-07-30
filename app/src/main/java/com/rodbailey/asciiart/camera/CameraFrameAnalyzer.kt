@@ -50,18 +50,8 @@ class CameraFrameAnalyzer(
                 preset = AsciiCharsetPreset.PRINTABLE
             )
         }
-        val displayBitmap = if (colorEnabled && orientedAsciiColors != null) {
-            bitmapFromColorGrid(
-                colors = orientedAsciiColors,
-                width = orientedBitmap.width,
-                height = orientedBitmap.height
-            )
-        } else {
-            orientedBitmap
-        }
-
         mainThreadHandler.post {
-            onFrameProcessed(displayBitmap, asciiText, orientedAsciiColors)
+            onFrameProcessed(orientedBitmap, asciiText, orientedAsciiColors)
         }
     }
 
@@ -154,9 +144,4 @@ class CameraFrameAnalyzer(
         return rotated
     }
 
-    private fun bitmapFromColorGrid(colors: IntArray, width: Int, height: Int): Bitmap {
-        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
-            setPixels(colors, 0, width, 0, 0, width, height)
-        }
-    }
 }
