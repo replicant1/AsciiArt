@@ -41,9 +41,7 @@ object AsciiArt {
      * @return A multi-line ASCII string with dimensions matching the input bitmap
      */
     fun toAsciiText(grayscaleBitmap: Bitmap, preset: AsciiCharsetPreset): String {
-        val sortedChars = sortedCharsetCache.getOrPut(preset) {
-            buildCharacterSet(preset).sortedBy { measureVisualDensity(it) }
-        }
+        val sortedChars = sortedCharsetCache.getOrPut(preset) { buildSortedCharset(preset) }
         if (sortedChars.isEmpty()) {
             return ""
         }
@@ -84,37 +82,41 @@ object AsciiArt {
         }
     }
 
-    private fun measureVisualDensity(character: Char): Float {
-        if (character == ' ') {
-            return 0f
-        }
-
-        val bitmap = Bitmap.createBitmap(
-            densityGridWidth,
-            densityGridHeight,
-            Bitmap.Config.ARGB_8888
-        )
-        val canvas = Canvas(bitmap)
-        canvas.drawColor(Color.BLACK)
-
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    /**
+     * Sorts the character set for [preset] by visual density using a single set of
+     * scratch objects (Bitmap, Canvas, Paint, Rect, IntArray) reused across every
+     * character — replacing the previous approach that allocated all of these fresh
+     * for each of the 95–200 characters in the set.
+     */
+    private fun buildSortedCharset(preset: AsciiCharsetPreset): List<Char> {
+        val chars = buildCharacterSet(preset)
+        val scratchBitmap = Bitmap.createBitmap(densityGridWidth, densityGridHeight, Bitmap.Config.ARGB_8888)
+        val scratchCanvas = Canvas(scratchBitmap)
+        val scratchPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textSize = densityTextSizePx
             typeface = Typeface.MONOSPACE
         }
-
-        val text = character.toString()
-        val bounds = Rect()
-        paint.getTextBounds(text, 0, text.length, bounds)
-        val x = ((densityGridWidth - bounds.width()) / 2f) - bounds.left
-        val y = ((densityGridHeight - bounds.height()) / 2f) - bounds.top
-        canvas.drawText(text, x, y, paint)
-
-        val pixels = IntArray(densityGridWidth * densityGridHeight)
-        bitmap.getPixels(pixels, 0, densityGridWidth, 0, 0, densityGridWidth, densityGridHeight)
-        bitmap.recycle()
-
-        val activePixelCount = pixels.count { (it and 0xFF) > 0 }
-        return activePixelCount.toFloat() / (densityGridWidth * densityGridHeight)
+        val scratchPixels = IntArray(densityGridWidth * densityGridHeight)
+        val scratchBounds = Rect()
+        val scratchChar = CharArray(1)
+        return try {
+            chars.sortedBy { char ->
+                if (char == ' ') {
+                    0f
+                } else {
+                    scratchCanvas.drawColor(Color.BLACK)
+                    scratchChar[0] = char
+                    scratchPaint.getTextBounds(scratchChar, 0, 1, scratchBounds)
+                    val x = ((densityGridWidth - scratchBounds.width()) / 2f) - scratchBounds.left
+                    val y = ((densityGridHeight - scratchBounds.height()) / 2f) - scratchBounds.top
+                    scratchCanvas.drawText(scratchChar, 0, 1, x, y, scratchPaint)
+                    scratchBitmap.getPixels(scratchPixels, 0, densityGridWidth, 0, 0, densityGridWidth, densityGridHeight)
+                    scratchPixels.count { (it and 0xFF) > 0 }.toFloat() / (densityGridWidth * densityGridHeight)
+                }
+            }
+        } finally {
+            scratchBitmap.recycle()
+        }
     }
 }
