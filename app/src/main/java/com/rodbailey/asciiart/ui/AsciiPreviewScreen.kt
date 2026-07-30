@@ -230,6 +230,8 @@ private fun CameraTabContent(
                 AsciiDisplayMode.IMAGE -> {
                     ImagePreview(
                         bitmap = liveBitmapValue,
+                        colorEnabled = colorEnabled,
+                        asciiColors = liveAsciiColors,
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
@@ -408,14 +410,54 @@ private fun CameraAnalysisPipeline(
 }
 
 @Composable
-fun ImagePreview(bitmap: Bitmap, modifier: Modifier = Modifier) {
-    Image(
-        bitmap = bitmap.asImageBitmap(),
-        contentDescription = "Processed image preview",
-        modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
-        contentScale = ContentScale.Fit,
-        filterQuality = FilterQuality.None
-    )
+fun ImagePreview(
+    bitmap: Bitmap,
+    colorEnabled: Boolean = false,
+    asciiColors: IntArray? = null,
+    modifier: Modifier = Modifier
+) {
+    if (colorEnabled && asciiColors != null) {
+        val cellPaint = remember { AndroidPaint() }
+        Canvas(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant)) {
+            val sourceAspect = bitmap.width.toFloat() / bitmap.height.toFloat()
+            val canvasAspect = size.width / size.height
+            val drawWidth: Float
+            val drawHeight: Float
+            val drawOffsetX: Float
+            val drawOffsetY: Float
+            if (canvasAspect > sourceAspect) {
+                drawHeight = size.height
+                drawWidth = drawHeight * sourceAspect
+                drawOffsetX = (size.width - drawWidth) / 2f
+                drawOffsetY = 0f
+            } else {
+                drawWidth = size.width
+                drawHeight = drawWidth / sourceAspect
+                drawOffsetX = 0f
+                drawOffsetY = (size.height - drawHeight) / 2f
+            }
+            val cellWidth = drawWidth / bitmap.width
+            val cellHeight = drawHeight / bitmap.height
+            val nativeCanvas = drawContext.canvas.nativeCanvas
+            for (y in 0 until bitmap.height) {
+                val top = drawOffsetY + y * cellHeight
+                val bottom = top + cellHeight
+                for (x in 0 until bitmap.width) {
+                    cellPaint.color = asciiColors[(y * bitmap.width) + x]
+                    val left = drawOffsetX + x * cellWidth
+                    nativeCanvas.drawRect(left, top, left + cellWidth, bottom, cellPaint)
+                }
+            }
+        }
+    } else {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = "Processed image preview",
+            modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
+            contentScale = ContentScale.Fit,
+            filterQuality = FilterQuality.None
+        )
+    }
 }
 
 @Composable
