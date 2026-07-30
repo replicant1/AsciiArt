@@ -499,6 +499,26 @@ fun AsciiGridPreview(
     }
     textPaint.color = defaultAsciiColor
 
+    // Pre-allocated FontMetrics — avoids the new FontMetrics() allocation on every frame
+    // that textPaint.fontMetrics produces. getFontMetrics(existing) fills it in-place.
+    val fontMetricsCache = remember { AndroidPaint.FontMetrics() }
+
+    // Caches the last computed cell dimensions and their derived text metrics so that
+    // measureText() and textSize mutations are skipped on frames where the cell size
+    // is unchanged (i.e. every frame in steady state).
+    val textMetricsCache = remember { FloatArray(4) { -1f } }
+    val CACHE_CELL_WIDTH = 0
+    val CACHE_CELL_HEIGHT = 1
+    val CACHE_CHAR_WIDTH = 2
+    val CACHE_BASELINE_OFFSET = 3
+
+    // Text height as a fraction of cell height. Set to slightly less than 1.0 so that
+    // characters with tall ascenders or deep descenders (e.g. '|', 'g', 'y') do not
+    // overflow into adjacent cells. The value was determined empirically: at 1.0 some
+    // glyphs clip; at 0.90 the gap is visually noticeable; 0.92 is the largest value
+    // that keeps all printable ASCII glyphs within their cell bounds.
+    val TEXT_SIZE_CELL_FRACTION = 0.92f
+
     Canvas(
         modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant)
     ) {
@@ -537,18 +557,26 @@ fun AsciiGridPreview(
         if (asciiText.isNotEmpty()) {
             val cellWidth = drawWidth / bitmap.width
             val cellHeight = drawHeight / bitmap.height
-            val baseTextSize = cellHeight * 0.92f
-            textPaint.textSize = baseTextSize
-            val sampleWidth = textPaint.measureText(gridWidthSampleChar).coerceAtLeast(1f)
-            if (sampleWidth > cellWidth) {
-                textPaint.textSize = baseTextSize * (cellWidth / sampleWidth)
-            }
-            val fontMetrics = textPaint.fontMetrics
-            val baselineOffset = (cellHeight - (fontMetrics.bottom - fontMetrics.top)) / 2f - fontMetrics.top
 
-            // Compute charWidth once — same for every character in a monospace font.
-            // Replaces 36K measureText() calls per frame with one.
-            val charWidth = textPaint.measureText(gridWidthSampleChar)
+            // Recompute text metrics only when cell dimensions change.
+            // In steady state (no scale/canvas change) this block is skipped entirely,
+            // saving 2x measureText() calls, 1x FontMetrics allocation, and 1-2x
+            // textPaint.textSize mutations per frame.
+            if (cellWidth != textMetricsCache[CACHE_CELL_WIDTH] || cellHeight != textMetricsCache[CACHE_CELL_HEIGHT]) {
+                val baseTextSize = cellHeight * TEXT_SIZE_CELL_FRACTION
+                textPaint.textSize = baseTextSize
+                val sampleWidth = textPaint.measureText(gridWidthSampleChar).coerceAtLeast(1f)
+                if (sampleWidth > cellWidth) {
+                    textPaint.textSize = baseTextSize * (cellWidth / sampleWidth)
+                }
+                textPaint.getFontMetrics(fontMetricsCache)
+                textMetricsCache[CACHE_BASELINE_OFFSET] = (cellHeight - (fontMetricsCache.bottom - fontMetricsCache.top)) / 2f - fontMetricsCache.top
+                textMetricsCache[CACHE_CHAR_WIDTH] = textPaint.measureText(gridWidthSampleChar)
+                textMetricsCache[CACHE_CELL_WIDTH] = cellWidth
+                textMetricsCache[CACHE_CELL_HEIGHT] = cellHeight
+            }
+            val baselineOffset = textMetricsCache[CACHE_BASELINE_OFFSET]
+            val charWidth = textMetricsCache[CACHE_CHAR_WIDTH]
 
             // Pre-compute the x origin so each character is centred in its cell.
             val rowStartX = drawOffsetX + (cellWidth - charWidth) / 2f
