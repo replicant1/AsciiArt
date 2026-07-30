@@ -469,7 +469,26 @@ fun AsciiGridPreview(
     drawSourceImage: Boolean,
     modifier: Modifier,
 ) {
-    val rows = remember(asciiText) { asciiText.split('\n') }
+    // Build an IntArray of row-start indices by scanning asciiText once for '\n'.
+    // Replaces asciiText.split('\n') which allocated the following per frame:
+    //   - 1 List<String> wrapper
+    //   - 240 String objects (one per row; count = bitmap.height = 1920/scaleFactor on Pixel 3)
+    //   - 240 backing char[] arrays (ART does not share buffers between split substrings)
+    //   Each row is ~135 chars (bitmap.width = 1080/scaleFactor), so each char[] is
+    //   ~286 bytes → total ~85 KB allocated per frame → ~2.5 MB/sec of GC pressure at 30fps.
+    // Now: one IntArray(241) ≈ 964 bytes. drawText(asciiText, rowStart, rowEnd, ...) reads
+    // directly from the original string's char[] with no copy and no new heap objects.
+    // rowOffsets[y] is the index in asciiText where row y begins.
+    val rowOffsets = remember(asciiText) {
+        val newlineCount = asciiText.count { it == '\n' }
+        val offsets = IntArray(newlineCount + 1)
+        offsets[0] = 0
+        var row = 1
+        for (i in asciiText.indices) {
+            if (asciiText[i] == '\n' && row <= newlineCount) offsets[row++] = i + 1
+        }
+        offsets
+    }
     val defaultAsciiColor = MaterialTheme.colorScheme.onSurface.toArgb()
     val gridWidthSampleChar = stringResource(R.string.grid_width_sample_char)
     val textPaint = remember {
@@ -515,7 +534,7 @@ fun AsciiGridPreview(
             )
         }
 
-        if (rows.isNotEmpty()) {
+        if (asciiText.isNotEmpty()) {
             val cellWidth = drawWidth / bitmap.width
             val cellHeight = drawHeight / bitmap.height
             val baseTextSize = cellHeight * 0.92f
@@ -540,13 +559,16 @@ fun AsciiGridPreview(
                 // Non-colour: draw each row in a single drawText() call (~270 calls/frame
                 // instead of ~36,450). Paint.letterSpacing pads the advance of each glyph
                 // so characters stay centred in their cells.
+                // drawText(String, start, end, ...) indexes directly into asciiText —
+                // no row String objects needed.
                 textPaint.color = defaultAsciiColor
                 textPaint.letterSpacing = (cellWidth - charWidth) / textPaint.textSize
                 for (y in 0 until bitmap.height) {
-                    val row = rows.getOrNull(y).orEmpty()
-                    if (row.isEmpty()) continue
+                    val rowStart = rowOffsets.getOrNull(y) ?: continue
+                    val rowEnd = if (y + 1 < rowOffsets.size) rowOffsets[y + 1] - 1 else asciiText.length
+                    if (rowStart >= rowEnd) continue
                     val textY = drawOffsetY + (y * cellHeight) + baselineOffset
-                    nativeCanvas.drawText(row, 0, row.length, rowStartX, textY, textPaint)
+                    nativeCanvas.drawText(asciiText, rowStart, rowEnd, rowStartX, textY, textPaint)
                 }
                 textPaint.letterSpacing = 0f
             } else {
@@ -554,12 +576,13 @@ fun AsciiGridPreview(
                 // Reuse a CharArray(1) to avoid 36K String allocations per frame.
                 val singleChar = CharArray(1)
                 for (y in 0 until bitmap.height) {
-                    val row = rows.getOrNull(y).orEmpty()
+                    val rowStart = rowOffsets.getOrNull(y) ?: continue
+                    val rowEnd = if (y + 1 < rowOffsets.size) rowOffsets[y + 1] - 1 else asciiText.length
                     val textY = drawOffsetY + (y * cellHeight) + baselineOffset
                     for (x in 0 until bitmap.width) {
                         val pixelIndex = (y * bitmap.width) + x
                         textPaint.color = asciiColors?.getOrNull(pixelIndex) ?: defaultAsciiColor
-                        singleChar[0] = row.getOrElse(x) { ' ' }
+                        singleChar[0] = if (rowStart + x < rowEnd) asciiText[rowStart + x] else ' '
                         val textX = rowStartX + (x * cellWidth)
                         nativeCanvas.drawText(singleChar, 0, 1, textX, textY, textPaint)
                     }
