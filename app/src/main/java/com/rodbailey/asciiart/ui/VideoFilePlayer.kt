@@ -123,10 +123,11 @@ fun ExoPlayerVideoFileTab(
                 .weight(1f)
         ) {
             // Hidden TextureView — always present so ExoPlayer can render decoded frames
-            // to it in ASCII mode. getBitmap() reads from this surface.
+            // to it in ASCII mode. alpha=0f keeps it invisible while the SurfaceTexture
+            // remains active, so getBitmap() still captures frames correctly.
             AndroidView(
                 factory = { ctx ->
-                    TextureView(ctx).also { captureTextureView = it }
+                    TextureView(ctx).apply { alpha = 0f }.also { captureTextureView = it }
                 },
                 modifier = Modifier.fillMaxSize()
             )

@@ -89,16 +89,20 @@ class ExoPlayerFrameListener(
 
     /**
      * Captures the current frame from the TextureView and sends it to the processing queue.
-     * getBitmap(scaledWidth, scaledHeight) performs the GPU→CPU copy and scales in one step,
-     * replacing both getFrameAtTime() and the subsequent createScaledBitmap() call.
+     * We use the TextureView's layout dimensions (not videoFormat.width/height) because
+     * getBitmap() captures the screen-rendered result after ExoPlayer has applied its
+     * rotation/scaling transform. Using raw codec dimensions would produce a squished or
+     * mis-oriented bitmap when the video has rotation metadata (e.g. rotationDegrees=90).
      */
     private fun captureFrameToQueue(currentTimeMs: Long) {
         val textureView = textureViewProvider() ?: return
         if (!textureView.isAvailable) return
-        val videoFormat = exoPlayer.videoFormat ?: return
+        val tvW = textureView.width
+        val tvH = textureView.height
+        if (tvW <= 0 || tvH <= 0) return
         val scaleFactor = scaleFactorProvider()
-        val scaledWidth = (videoFormat.width / scaleFactor).coerceAtLeast(1)
-        val scaledHeight = (videoFormat.height / scaleFactor).coerceAtLeast(1)
+        val scaledWidth = (tvW / scaleFactor).coerceAtLeast(1)
+        val scaledHeight = (tvH / scaleFactor).coerceAtLeast(1)
         val bitmap = textureView.getBitmap(scaledWidth, scaledHeight) ?: return
         val sent = frameQueue.trySend(bitmap).isSuccess
         if (sent) {
