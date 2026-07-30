@@ -203,6 +203,20 @@ classDiagram
     ExoPlayerFrameCapture --> ImageProcessor
 ```
 
+| Class | Description |
+|---|---|
+| `MainActivity` | The app's single Android `Activity`. Configures edge-to-edge / transparent system bar styling and hosts the root Compose content via `setContent`. |
+| `AsciiPreviewScreen` | Root composable screen. Owns all shared UI state — scale factor, contrast, colour toggle, display mode, and the current live frame — and renders the control panel plus the tab selector. |
+| `CameraAnalysisPipeline` | Private composable that wires up CameraX `ImageAnalysis`, binds it to the `LifecycleOwner`, and forwards each raw camera frame to a `CameraFrameAnalyzer` instance. |
+| `CameraFrameAnalyzer` | Implements `ImageAnalysis.Analyzer`. Receives raw YUV `ImageProxy` frames from CameraX, delegates pixel processing to `ImageProcessor`, applies the sensor-orientation rotation correction, optionally generates ASCII text, and posts results to the UI thread. |
+| `ImageProcessor` | Stateless singleton. Downsamples luma data from a YUV `ImageProxy` or an existing `Bitmap`, applies contrast adjustment, and produces a grayscale `Bitmap` plus an optional per-cell ARGB colour array. |
+| `FrameProcessingResult` | Immutable data class that carries the output of a single `ImageProcessor` call: a downsampled grayscale `Bitmap` and an optional `IntArray` of per-cell ARGB colours. |
+| `AsciiArt` | Stateless singleton. Converts a grayscale bitmap to a multi-line ASCII `String` by mapping each pixel's intensity to a character chosen from a density-sorted printable ASCII set. Caches the sorted character set per preset. |
+| `AsciiDisplayMode` | Enum with two values — `IMAGE` (render de-res bitmap cells) and `ASCII` (render character glyphs) — shared across both tabs. |
+| `ExoPlayerVideoFileTab` | Composable for the Video File tab. Creates and manages the `ExoPlayer` instance and its lifecycle, delegates frame extraction to `ExoPlayerFrameListener`, and renders the ASCII or image output. |
+| `ExoPlayerFrameListener` | Bridges ExoPlayer playback and ASCII processing. Polls the player position at ~60 Hz on the main thread, queues frame timestamps through a `Channel`, and processes them on an IO thread via `MediaMetadataRetriever`, `ImageProcessor`, and `AsciiArt`. |
+| `ExoPlayerFrameCapture` | Represents the frame-extraction step handled inside `ExoPlayerFrameListener`: extracts a `Bitmap` from the video at a given timestamp using `MediaMetadataRetriever`, scales it down, then routes it through `ImageProcessor` and `AsciiArt` to produce the final display output. |
+
 ### Video File Processing Sequence
 ```mermaid
 sequenceDiagram
