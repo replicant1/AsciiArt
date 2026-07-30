@@ -15,6 +15,15 @@ Both tabs support a **Colour** toggle:
 - **Off:** output is grayscale-based.
 - **On:** each de-res cell is assigned a sampled color, and ASCII glyphs (and Image mode cells) use that color.
 
+## Screenshots
+
+| Live Camera Tab | Video File Tab |
+|---|---|
+| ![Live Camera tab showing ASCII art output from the device camera][screenshot-live] | ![Video File tab showing ASCII art output from a video file][screenshot-video] |
+
+[screenshot-live]: docs/screenshot_live_camera.png
+[screenshot-video]: docs/screenshot_video_file.png
+
 ## Why this was created
 This project was created as an exploration of **GitHub Copilot’s capability** to iteratively design, implement, debug, and refine a non-trivial real-time graphics pipeline in an Android app.
 
