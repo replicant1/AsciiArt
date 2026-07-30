@@ -12,6 +12,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentLinkedQueue
 
 private const val TAG = "ExoPlayerFrameListener"
 
@@ -47,8 +48,16 @@ class ExoPlayerFrameListener(
     private val scope = CoroutineScope(Job() + Dispatchers.Main.immediate)
     private val frameQueue = Channel<Bitmap>(2)
     private var lastDisplayedBitmap: Bitmap? = null
-
     private val frameState = FrameQueueState()
+
+    /**
+     * Pool of pre-allocated capture bitmaps. Eliminates the per-frame Bitmap allocation
+     * from TextureView.getBitmap(w, h). A bitmap has exactly one owner at any time:
+     * the pool, the channel, or the IO processor — so reuse is always safe.
+     * Accessed from both the main thread (capture) and IO thread (post-process return),
+     * so ConcurrentLinkedQueue is used for thread safety.
+     */
+    private val captureBitmapPool = ConcurrentLinkedQueue<Bitmap>()
 
     fun startListening() {
         scope.launch(Dispatchers.Main) { pollForFrames() }
@@ -63,6 +72,11 @@ class ExoPlayerFrameListener(
         stopListening()
         lastDisplayedBitmap?.recycle()
         lastDisplayedBitmap = null
+        var pooled = captureBitmapPool.poll()
+        while (pooled != null) {
+            pooled.recycle()
+            pooled = captureBitmapPool.poll()
+        }
     }
 
     /**
@@ -103,12 +117,28 @@ class ExoPlayerFrameListener(
         val scaleFactor = scaleFactorProvider()
         val scaledWidth = (tvW / scaleFactor).coerceAtLeast(1)
         val scaledHeight = (tvH / scaleFactor).coerceAtLeast(1)
-        val bitmap = textureView.getBitmap(scaledWidth, scaledHeight) ?: return
+
+        // Reuse a pooled bitmap if one with the correct dimensions is available.
+        // This avoids a Bitmap allocation (+ GC pressure) on every frame.
+        val pooled = captureBitmapPool.poll()
+        val bitmap = when {
+            pooled != null && pooled.width == scaledWidth && pooled.height == scaledHeight -> {
+                // Overwrite the pooled bitmap in-place — no allocation needed.
+                textureView.getBitmap(pooled) ?: run { captureBitmapPool.offer(pooled); return }
+            }
+            else -> {
+                // Wrong size (e.g. scale factor changed) or pool empty — allocate fresh.
+                pooled?.recycle()
+                textureView.getBitmap(scaledWidth, scaledHeight) ?: return
+            }
+        }
+
         val sent = frameQueue.trySend(bitmap).isSuccess
         if (sent) {
             frameState.recordQueuedFrame(currentTimeMs)
         } else {
-            bitmap.recycle()  // Channel full — drop frame rather than queue memory pressure
+            // Channel full — return to pool for reuse on the next capture rather than recycling.
+            captureBitmapPool.offer(bitmap)
         }
     }
 
@@ -136,7 +166,9 @@ class ExoPlayerFrameListener(
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing frame", e)
             } finally {
-                bitmap.recycle()
+                // Return capture bitmap to pool — processBitmap() has finished reading it.
+                // It will be overwritten by the next getBitmap() call, never read stale.
+                captureBitmapPool.offer(bitmap)
             }
         }
     }
