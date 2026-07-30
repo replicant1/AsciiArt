@@ -1,11 +1,9 @@
 package com.rodbailey.asciiart.processing
 
 import android.graphics.Bitmap
-import android.media.MediaMetadataRetriever
 import android.util.Log
+import android.view.TextureView
 import com.google.android.exoplayer2.ExoPlayer
-import com.google.android.exoplayer2.Renderer
-import com.google.android.exoplayer2.video.VideoRendererEventListener
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,22 +16,27 @@ import kotlinx.coroutines.withContext
 private const val TAG = "ExoPlayerFrameListener"
 
 /**
- * Listens to ExoPlayer's rendering events and extracts frames for ASCII processing.
- * Uses coroutines to bridge main thread (ExoPlayer polling) and background processing thread.
+ * Captures frames from ExoPlayer for ASCII processing.
  *
- * The producer-consumer pattern:
- * - Main thread: Polls ExoPlayer position at ~60Hz, detects when new frames are needed
- * - IO thread: Extracts frames from MediaMetadataRetriever, processes to ASCII
- * - Channel: Transfers frame timestamps between threads safely
+ * Uses coroutines with a producer-consumer pattern:
+ * - Main thread: Polls ExoPlayer position at ~60Hz. When a new frame is due, calls
+ *   [TextureView.getBitmap] to capture the frame that ExoPlayer has already decoded
+ *   and rendered to the TextureView. This is a GPU→CPU copy (~5–15ms) and is orders
+ *   of magnitude faster than the previous MediaMetadataRetriever.getFrameAtTime()
+ *   approach (~50–200ms per seek-and-decode).
+ * - IO thread: Receives captured bitmaps from the channel and runs them through
+ *   ImageProcessor and AsciiArt, then posts results back to the main thread.
+ * - Channel<Bitmap>: Transfers captured bitmaps between threads. Sized at 2; excess
+ *   frames are dropped (trySend) to avoid memory pressure from a slow IO thread.
  */
 class ExoPlayerFrameListener(
     private val exoPlayer: ExoPlayer,
-    private val videoUri: String,
+    private val textureViewProvider: () -> TextureView?,
     private val scaleFactorProvider: () -> Int,
     private val contrastFactorProvider: () -> Float,
     private val colorEnabledProvider: () -> Boolean,
     private val displayModeProvider: () -> AsciiDisplayMode,
-    private val frameSkipRate: Int = 2,  // Process every Nth frame opportunity
+    private val frameSkipRate: Int = 2,
     private val onFrameProcessed: (
         bitmap: Bitmap,
         asciiText: String,
@@ -42,25 +45,14 @@ class ExoPlayerFrameListener(
 ) {
 
     private val scope = CoroutineScope(Job() + Dispatchers.Main.immediate)
-    private val frameQueue = Channel<Long>(10)  // Max 10 pending frame times
-    private var lastDisplayedBitmap: Bitmap? = null  // Track bitmap for recycling
+    private val frameQueue = Channel<Bitmap>(2)
+    private var lastDisplayedBitmap: Bitmap? = null
 
-    private val retriever by lazy { MediaMetadataRetriever().apply { setDataSource(videoUri) } }
-    
-    /**
-     * Tracks frame timing state to manage queueing and processing.
-     * Keeps playback position history separate from processing history.
-     */
     private val frameState = FrameQueueState()
 
     fun startListening() {
-        scope.launch(Dispatchers.Main) {
-            pollForFrames()
-        }
-        
-        scope.launch(Dispatchers.IO) {
-            processQueuedFrames()
-        }
+        scope.launch(Dispatchers.Main) { pollForFrames() }
+        scope.launch(Dispatchers.IO) { processQueuedFrames() }
     }
 
     fun stopListening() {
@@ -69,118 +61,79 @@ class ExoPlayerFrameListener(
 
     fun release() {
         stopListening()
-        try {
-            lastDisplayedBitmap?.recycle()
-            lastDisplayedBitmap = null
-            retriever.release()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error releasing retriever", e)
-        }
+        lastDisplayedBitmap?.recycle()
+        lastDisplayedBitmap = null
     }
 
     /**
      * Polls ExoPlayer's playback position every ~16ms on the main thread.
-     * MUST run on main thread because ExoPlayer's API is designed for main thread access.
-     *
-     * Responsibilities:
-     * - Detect when playback position has advanced enough to warrant frame extraction
-     * - Implement frame skipping to control processing rate (e.g., process every 2nd opportunity)
-     * - Detect playback restarts (seeking backwards) and reset state
+     * When a frame is due, captures the current TextureView content via getBitmap()
+     * and forwards the bitmap to the processing channel.
      */
     private suspend fun pollForFrames() {
         while (true) {
-            if (exoPlayer.isPlaying) {
+            if (exoPlayer.isPlaying && displayModeProvider() == AsciiDisplayMode.ASCII) {
                 val currentTimeMs = exoPlayer.currentPosition
-                
-                // Detect seek backward or video loop (position jumped back by >1 second)
+
                 if (frameState.detectPlaybackRestart(currentTimeMs)) {
                     Log.d(TAG, "Playback restart detected, resetting frame state")
                 }
-                
-                // Queue frame if position advanced significantly and frame skip count allows
+
                 if (frameState.shouldQueueFrame(currentTimeMs, frameSkipRate)) {
-                    try {
-                        frameQueue.send(currentTimeMs)
-                        frameState.recordQueuedFrame(currentTimeMs)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error queuing frame", e)
-                    }
+                    captureFrameToQueue(currentTimeMs)
                 }
             }
-            delay(16)  // ~60Hz polling
+            delay(16)
         }
     }
 
     /**
-     * Processes frames from the queue on a background thread (Dispatchers.IO).
-     * Decoupled from polling to prevent UI thread blocking during heavy frame extraction.
-     *
-     * Responsibilities:
-     * - Extract frame bitmap from video at the requested timestamp
-     * - Scale bitmap down for ASCII processing
-     * - Generate ASCII text and color grid
-     * - Post results back to main thread for UI update
+     * Captures the current frame from the TextureView and sends it to the processing queue.
+     * getBitmap(scaledWidth, scaledHeight) performs the GPU→CPU copy and scales in one step,
+     * replacing both getFrameAtTime() and the subsequent createScaledBitmap() call.
+     */
+    private fun captureFrameToQueue(currentTimeMs: Long) {
+        val textureView = textureViewProvider() ?: return
+        if (!textureView.isAvailable) return
+        val videoFormat = exoPlayer.videoFormat ?: return
+        val scaleFactor = scaleFactorProvider()
+        val scaledWidth = (videoFormat.width / scaleFactor).coerceAtLeast(1)
+        val scaledHeight = (videoFormat.height / scaleFactor).coerceAtLeast(1)
+        val bitmap = textureView.getBitmap(scaledWidth, scaledHeight) ?: return
+        val sent = frameQueue.trySend(bitmap).isSuccess
+        if (sent) {
+            frameState.recordQueuedFrame(currentTimeMs)
+        } else {
+            bitmap.recycle()  // Channel full — drop frame rather than queue memory pressure
+        }
+    }
+
+    /**
+     * Receives captured bitmaps from the queue and runs them through ImageProcessor
+     * and AsciiArt on the IO thread. Results are posted back to the main thread.
      */
     private suspend fun processQueuedFrames() {
-        for (frameTimeMs in frameQueue) {
+        for (bitmap in frameQueue) {
             try {
-                // Only process if this is a new frame OR a re-process of the current frame
-                // Re-processing happens when user changes parameters (scale, contrast, etc)
-                if (frameState.shouldProcessFrame(frameTimeMs)) {
-                    val frameTimeUs = frameTimeMs * 1000
-                    val bitmap = retriever.getFrameAtTime(frameTimeUs, MediaMetadataRetriever.OPTION_CLOSEST)
-                    if (bitmap != null) {
-                        processFrame(bitmap, frameTimeMs)
-                    }
+                val frameResult = ImageProcessor.processBitmap(
+                    bitmap = bitmap,
+                    contrastFactor = contrastFactorProvider(),
+                    colorEnabled = colorEnabledProvider()
+                )
+                val asciiText = AsciiArt.toAsciiText(
+                    grayscaleBitmap = frameResult.grayscaleBitmap,
+                    preset = AsciiCharsetPreset.PRINTABLE
+                )
+                withContext(Dispatchers.Main) {
+                    lastDisplayedBitmap?.recycle()
+                    lastDisplayedBitmap = frameResult.grayscaleBitmap
+                    onFrameProcessed(frameResult.grayscaleBitmap, asciiText, frameResult.asciiColors)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing frame", e)
+            } finally {
+                bitmap.recycle()
             }
         }
-    }
-
-    private suspend fun processFrame(bitmap: Bitmap, frameTimeMs: Long) {
-        // Create a reduced-size bitmap for ASCII processing
-        val scaleFactor = scaleFactorProvider()
-        val scaledWidth = (bitmap.width / scaleFactor).coerceAtLeast(1)
-        val scaledHeight = (bitmap.height / scaleFactor).coerceAtLeast(1)
-        val scaledBitmap = Bitmap.createScaledBitmap(bitmap, scaledWidth, scaledHeight, true)
-
-        try {
-            // Process through ImageProcessor to get grayscale and colors
-            val frameResult = ImageProcessor.processBitmap(
-                bitmap = scaledBitmap,
-                contrastFactor = contrastFactorProvider(),
-                colorEnabled = colorEnabledProvider()
-            )
-
-            // Generate ASCII text (always, regardless of display mode)
-            val asciiText = AsciiArt.toAsciiText(
-                grayscaleBitmap = frameResult.grayscaleBitmap,
-                preset = AsciiCharsetPreset.PRINTABLE
-            )
-
-            // Always use grayscale bitmap as display - AsciiGridPreview will overlay colors if enabled
-            val displayBitmap = frameResult.grayscaleBitmap
-
-            // Post result back to main thread for UI update
-            withContext(Dispatchers.Main) {
-                // Recycle the previously displayed bitmap to prevent memory leak
-                lastDisplayedBitmap?.recycle()
-                lastDisplayedBitmap = displayBitmap
-                onFrameProcessed(displayBitmap, asciiText, frameResult.asciiColors)
-            }
-        } finally {
-            // Clean up the scaled bitmap (it's no longer needed after processing)
-            if (scaledBitmap != bitmap) {
-                scaledBitmap.recycle()
-            }
-        }
-    }
-
-    private fun bitmapFromColorGrid(colors: IntArray, width: Int, height: Int): Bitmap {
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        bitmap.setPixels(colors, 0, width, 0, 0, width, height)
-        return bitmap
     }
 }
