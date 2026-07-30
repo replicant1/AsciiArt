@@ -19,7 +19,7 @@ Both tabs support a **Colour** toggle:
 
 | Live Camera Tab | Video File Tab |
 |---|---|
-| ![Live Camera tab showing ASCII art output from the device camera][screenshot-live] | ![Video File tab showing ASCII art output from a video file][screenshot-video] |
+| ![Live Camera tab showing ASCII art output from the device camera][screenshot-live] | ![Video File tab showing the Load, Restart, Play and Pause control bar with ASCII art output from a video file][screenshot-video] |
 
 [screenshot-live]: docs/screenshot_live_camera.png
 [screenshot-video]: docs/screenshot_video_file.png
@@ -213,9 +213,9 @@ classDiagram
 | `FrameProcessingResult` | Immutable data class that carries the output of a single `ImageProcessor` call: a downsampled grayscale `Bitmap` and an optional `IntArray` of per-cell ARGB colours. |
 | `AsciiArt` | Stateless singleton. Converts a grayscale bitmap to a multi-line ASCII `String` by mapping each pixel's intensity to a character chosen from a density-sorted printable ASCII set. Caches the sorted character set per preset. |
 | `AsciiDisplayMode` | Enum with two values — `IMAGE` (render de-res bitmap cells) and `ASCII` (render character glyphs) — shared across both tabs. |
-| `ExoPlayerVideoFileTab` | Composable for the Video File tab. Creates and manages the `ExoPlayer` instance and its lifecycle, delegates frame extraction to `ExoPlayerFrameListener`, and renders the ASCII or image output. |
-| `ExoPlayerFrameListener` | Bridges ExoPlayer playback and ASCII processing. Polls the player position at ~60 Hz on the main thread, queues frame timestamps through a `Channel`, and processes them on an IO thread via `MediaMetadataRetriever`, `ImageProcessor`, and `AsciiArt`. |
-| `ExoPlayerFrameCapture` | Represents the frame-extraction step handled inside `ExoPlayerFrameListener`: extracts a `Bitmap` from the video at a given timestamp using `MediaMetadataRetriever`, scales it down, then routes it through `ImageProcessor` and `AsciiArt` to produce the final display output. |
+| `ExoPlayerVideoFileTab` | Composable for the Video File tab. Creates and manages the `ExoPlayer` instance and its lifecycle. Provides a persistent control bar (Load, Restart, Play, Pause) visible in both IMAGE and ASCII modes. Delegates frame extraction to `ExoPlayerFrameListener` and renders the ASCII or image output. |
+| `ExoPlayerFrameListener` | Bridges ExoPlayer playback and ASCII processing. Polls the player position at ~60 Hz on the main thread, captures rendered frames via `TextureView.getBitmap()` into a `Channel<Bitmap>`, and processes them on an IO thread via `ImageProcessor` and `AsciiArt`. |
+| `ExoPlayerFrameCapture` | Represents the frame-extraction step handled inside `ExoPlayerFrameListener`: captures a `Bitmap` from the hidden `TextureView` that ExoPlayer renders to in ASCII mode, scales it down, then routes it through `ImageProcessor` and `AsciiArt` to produce the final display output. |
 
 ### Video File Processing Sequence
 ```mermaid
