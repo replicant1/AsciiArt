@@ -151,7 +151,7 @@ class ExoPlayerFrameListener(
             val frameResult = ImageProcessor.processBitmap(
                 bitmap = scaledBitmap,
                 contrastFactor = contrastFactorProvider(),
-                colorEnabled = true  // Always generate colors for flexibility
+                colorEnabled = colorEnabledProvider()
             )
 
             // Generate ASCII text (always, regardless of display mode)
