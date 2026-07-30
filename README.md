@@ -42,7 +42,7 @@ This project was created as an exploration of **GitHub Copilot’s capability** 
 ### Video File Pipeline
 1. Load video file using ExoPlayer 2.19.1.
 2. Poll playback position at ~60Hz to detect new frames.
-3. Extract frames using `MediaMetadataRetriever.getFrameAtTime()`.
+3. Extract frames via `TextureView.getBitmap()` from a hidden zero-alpha `TextureView` that ExoPlayer renders to. Bitmaps are reused from a pool (`ConcurrentLinkedQueue`) to eliminate per-frame allocation.
 4. Process frames through the same pipeline as live camera:
    - Downsample according to scale factor
    - Apply contrast adjustment
@@ -52,8 +52,9 @@ This project was created as an exploration of **GitHub Copilot’s capability** 
 ## ASCII mapping algorithm
 For each de-res cell:
 1. Use the cell grayscale intensity (0..255).
-2. Map that value to an index in a density-sorted printable ASCII character list.
-3. Render the selected character at the corresponding on-screen cell bounds.
+2. Invert the intensity: `mappedValue = 255 - intensity`. This ensures that bright areas of the scene map to dense characters (e.g. `@`, `#`) and dark areas map to sparse characters (e.g. space, `.`), which is correct for white-on-black display.
+3. Map that inverted value to an index in a density-sorted printable ASCII character list.
+4. Render the selected character at the corresponding on-screen cell bounds.
 
 Character choice logic does **not** change when Colour is enabled; colour is applied as an additional rendering layer.
 
@@ -127,7 +128,8 @@ sequenceDiagram
     CFA->>CFA: Rotate bitmap to device orientation
     CFA->>CFA: Rotate color grid to device orientation
     alt Image Mode + Colour
-        CFA->>CFA: Create colored bitmap from grid
+        CFA->>UI: onFrameProcessed(displayBitmap, null, colorGrid)
+        UI->>UI: Draw colored rects directly from colorGrid (no bitmap created)
     else ASCII Mode + Colour
         CFA->>AA: toAsciiText(bitmap)
         AA-->>CFA: ASCII text
@@ -209,9 +211,9 @@ classDiagram
 | `AsciiPreviewScreen` | Root composable screen. Owns all shared UI state — scale factor, contrast, colour toggle, display mode, and the current live frame — and renders the control panel plus the tab selector. |
 | `CameraAnalysisPipeline` | Private composable that wires up CameraX `ImageAnalysis`, binds it to the `LifecycleOwner`, and forwards each raw camera frame to a `CameraFrameAnalyzer` instance. |
 | `CameraFrameAnalyzer` | Implements `ImageAnalysis.Analyzer`. Receives raw YUV `ImageProxy` frames from CameraX, delegates pixel processing to `ImageProcessor`, applies the sensor-orientation rotation correction, optionally generates ASCII text, and posts results to the UI thread. |
-| `ImageProcessor` | Stateless singleton. Downsamples luma data from a YUV `ImageProxy` or an existing `Bitmap`, applies contrast adjustment, and produces a grayscale `Bitmap` plus an optional per-cell ARGB colour array. |
+| `ImageProcessor` | Singleton. Downsamples luma data from a YUV `ImageProxy` or an existing `Bitmap`, applies contrast adjustment, and produces a grayscale `Bitmap` plus an optional per-cell ARGB colour array. Maintains pre-allocated `IntArray` pixel buffers (grown only on dimension increase) to eliminate per-frame heap allocation. |
 | `FrameProcessingResult` | Immutable data class that carries the output of a single `ImageProcessor` call: a downsampled grayscale `Bitmap` and an optional `IntArray` of per-cell ARGB colours. |
-| `AsciiArt` | Stateless singleton. Converts a grayscale bitmap to a multi-line ASCII `String` by mapping each pixel's intensity to a character chosen from a density-sorted printable ASCII set. Caches the sorted character set per preset. |
+| `AsciiArt` | Singleton. Converts a grayscale bitmap to a multi-line ASCII `String` by mapping each pixel's inverted intensity (`255 - gray`) to a character chosen from a density-sorted printable ASCII set. Caches the sorted character set per preset to avoid re-measuring on every frame. |
 | `AsciiDisplayMode` | Enum with two values — `IMAGE` (render de-res bitmap cells) and `ASCII` (render character glyphs) — shared across both tabs. |
 | `ExoPlayerVideoFileTab` | Composable for the Video File tab. Creates and manages the `ExoPlayer` instance and its lifecycle. Provides a persistent control bar (Load, Restart, Play, Pause) visible in both IMAGE and ASCII modes. Delegates frame extraction to `ExoPlayerFrameListener` and renders the ASCII or image output. |
 | `ExoPlayerFrameListener` | Bridges ExoPlayer playback and ASCII processing. Polls the player position at ~60 Hz on the main thread, captures rendered frames via `TextureView.getBitmap()` into a `Channel<Bitmap>`, and processes them on an IO thread via `ImageProcessor` and `AsciiArt`. |
@@ -222,14 +224,14 @@ classDiagram
 sequenceDiagram
     participant UI as ExoPlayerVideoFileTab
     participant EFL as ExoPlayerFrameListener
-    participant EMR as MediaMetadataRetriever
+    participant TV as TextureView (hidden)
     participant IP as ImageProcessor
     participant AA as AsciiArt
     
     UI->>EFL: Create listener with provider lambdas
     EFL->>EFL: Start polling at ~60Hz
-    EFL->>EMR: getFrameAtTime(timeMs)
-    EMR-->>EFL: Bitmap at timeMs
+    EFL->>TV: getBitmap(pooledBitmap)
+    TV-->>EFL: Bitmap (reused from pool)
     EFL->>IP: processBitmap(bitmap, scaleFactor, contrastFactor)
     IP-->>EFL: FrameProcessingResult (grayscale, colors)
     EFL->>AA: toAsciiText(grayscaleBitmap)
