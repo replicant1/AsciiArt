@@ -12,6 +12,19 @@ data class FrameProcessingResult(
 )
 
 object ImageProcessor {
+
+    // Pre-allocated buffers for processLumaFrame (camera pipeline, single background thread).
+    // outputPixels is consumed by setPixels() within each call; lumaColorPixels is safe because
+    // rotateColorGridIfNeeded() always copies into a fresh IntArray before the buffer is reused.
+    private var lumaOutputPixels = IntArray(0)
+    private var lumaColorPixels = IntArray(0)
+
+    // Pre-allocated buffers for processBitmap (video pipeline, IO coroutine).
+    // Both are consumed (read/written) entirely within each call before the next call can start.
+    // colorPixels is NOT pre-allocated here because it escapes as asciiColors to Compose state.
+    private var bitmapInputPixels = IntArray(0)
+    private var bitmapOutputPixels = IntArray(0)
+
     fun processLumaFrame(
         image: ImageProxy,
         scaleFactor: Int,
@@ -30,8 +43,12 @@ object ImageProcessor {
         val rowStride = lumaPlane.rowStride
         val pixelStride = lumaPlane.pixelStride
 
-        val outputPixels = IntArray(outputWidth * outputHeight)
-        val colorPixels = if (colorEnabled) IntArray(outputWidth * outputHeight) else null
+        val size = outputWidth * outputHeight
+        if (lumaOutputPixels.size < size) lumaOutputPixels = IntArray(size)
+        val colorPixels: IntArray? = if (colorEnabled) {
+            if (lumaColorPixels.size < size) lumaColorPixels = IntArray(size)
+            lumaColorPixels
+        } else null
         val uPlane = image.planes[1]
         val vPlane = image.planes[2]
         val uBuffer = uPlane.buffer
@@ -47,7 +64,7 @@ object ImageProcessor {
                 val gray = lumaBuffer.get(lumaIndex).toInt() and 0xFF
                 val contrastedGray = (((gray - 128f) * contrast) + 128f).coerceIn(0f, 255f)
                 val adjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
-                outputPixels[outIndex] = (0xFF shl 24) or
+                lumaOutputPixels[outIndex] = (0xFF shl 24) or
                     (adjustedGray shl 16) or
                     (adjustedGray shl 8) or
                     adjustedGray
@@ -68,7 +85,7 @@ object ImageProcessor {
         }
 
         val grayscaleBitmap = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888).apply {
-            setPixels(outputPixels, 0, outputWidth, 0, 0, outputWidth, outputHeight)
+            setPixels(lumaOutputPixels, 0, outputWidth, 0, 0, outputWidth, outputHeight)
         }
         return FrameProcessingResult(
             grayscaleBitmap = grayscaleBitmap,
@@ -85,14 +102,15 @@ object ImageProcessor {
         val width = bitmap.width
         val height = bitmap.height
 
-        val pixels = IntArray(width * height)
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        val size = width * height
+        if (bitmapInputPixels.size < size) bitmapInputPixels = IntArray(size)
+        if (bitmapOutputPixels.size < size) bitmapOutputPixels = IntArray(size)
+        bitmap.getPixels(bitmapInputPixels, 0, width, 0, 0, width, height)
 
-        val outputPixels = IntArray(width * height)
-        val colorPixels = if (colorEnabled) IntArray(width * height) else null
+        val colorPixels = if (colorEnabled) IntArray(size) else null
 
-        for (i in pixels.indices) {
-            val argb = pixels[i]
+        for (i in 0 until size) {
+            val argb = bitmapInputPixels[i]
             val r = (argb shr 16) and 0xFF
             val g = (argb shr 8) and 0xFF
             val b = argb and 0xFF
@@ -102,7 +120,7 @@ object ImageProcessor {
             val contrastedGray = (((gray - 128f) * contrast) + 128f).coerceIn(0f, 255f)
             val adjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
 
-            outputPixels[i] = (0xFF shl 24) or
+            bitmapOutputPixels[i] = (0xFF shl 24) or
                 (adjustedGray shl 16) or
                 (adjustedGray shl 8) or
                 adjustedGray
@@ -113,7 +131,7 @@ object ImageProcessor {
         }
 
         val grayscaleBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
-            setPixels(outputPixels, 0, width, 0, 0, width, height)
+            setPixels(bitmapOutputPixels, 0, width, 0, 0, width, height)
         }
         return FrameProcessingResult(
             grayscaleBitmap = grayscaleBitmap,
