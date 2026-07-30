@@ -100,7 +100,7 @@ class CameraFrameAnalyzer(
     ): IntArray? {
         if (colors == null) return null
         val normalized = ((rotationDegrees % 360) + 360) % 360
-        if (normalized == 0) return colors
+        if (normalized == 0) return colors.copyOf()
 
         val rotated = IntArray(colors.size)
         when (normalized) {
