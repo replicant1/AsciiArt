@@ -1,14 +1,29 @@
 package com.rodbailey.asciiart.ui
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.Log
 import android.view.TextureView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,17 +37,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
+import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.ui.StyledPlayerView
 import com.rodbailey.asciiart.processing.AsciiDisplayMode
 import com.rodbailey.asciiart.processing.ExoPlayerFrameListener
 
 private const val TAG = "VideoFilePlayer"
-
-// Path to test video file on device
-private const val TEST_VIDEO_PATH = "file:///sdcard/Download/blue-eyes.mp4"
 
 @Composable
 fun ExoPlayerVideoFileTab(
@@ -46,30 +60,51 @@ fun ExoPlayerVideoFileTab(
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
     var frameListener by remember { mutableStateOf<ExoPlayerFrameListener?>(null) }
     var captureTextureView by remember { mutableStateOf<TextureView?>(null) }
+    var loadedVideoUri by remember { mutableStateOf<String?>(null) }
+    var isPlaying by remember { mutableStateOf(false) }
     var videoBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var asciiText by remember { mutableStateOf("") }
     var asciiColors by remember { mutableStateOf<IntArray?>(null) }
-    var frameCount by remember { mutableStateOf(0) }
 
-    // Wrap parameters in rememberUpdatedState so callbacks/lambdas always reference current values
     val currentScaleFactor = rememberUpdatedState(scaleFactor)
     val currentContrastFactor = rememberUpdatedState(contrastFactor)
     val currentColorEnabled = rememberUpdatedState(colorEnabled)
     val currentDisplayMode = rememberUpdatedState(displayMode)
     val currentCaptureTextureView = rememberUpdatedState(captureTextureView)
-
     val currentBitmapSetter = rememberUpdatedState { bitmap: Bitmap? -> videoBitmap = bitmap }
     val currentTextSetter = rememberUpdatedState { text: String -> asciiText = text }
     val currentColorsSetter = rememberUpdatedState { colors: IntArray? -> asciiColors = colors }
-    val currentFrameCounter = rememberUpdatedState { frameCount++ }
 
+    // File picker — opens in the Documents directory
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        contract = object : ActivityResultContracts.OpenDocument() {
+            override fun createIntent(context: android.content.Context, input: Array<String>): Intent {
+                return super.createIntent(context, input).apply {
+                    val docsUri = DocumentsContract.buildDocumentUri(
+                        "com.android.externalstorage.documents",
+                        "primary:Download"
+                    )
+                    putExtra(DocumentsContract.EXTRA_INITIAL_URI, docsUri)
+                }
+            }
+        }
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not persist URI permission", e)
+            }
+            loadedVideoUri = uri.toString()
+        }
+    }
+
+    // Create and tear down ExoPlayer + frame listener
     DisposableEffect(Unit) {
         val player = ExoPlayer.Builder(context).build()
         exoPlayer = player
-
-        val mediaItem = MediaItem.fromUri(Uri.parse(TEST_VIDEO_PATH))
-        player.setMediaItem(mediaItem)
-        player.prepare()
 
         val listener = ExoPlayerFrameListener(
             exoPlayer = player,
@@ -83,12 +118,10 @@ fun ExoPlayerVideoFileTab(
                 currentBitmapSetter.value(bitmap)
                 currentTextSetter.value(ascii)
                 currentColorsSetter.value(colors)
-                currentFrameCounter.value()
             }
         )
         frameListener = listener
         listener.startListening()
-        player.play()
 
         onDispose {
             listener.release()
@@ -98,33 +131,77 @@ fun ExoPlayerVideoFileTab(
         }
     }
 
-    // Switch ExoPlayer's render target when the display mode changes.
-    // - ASCII mode: render to the hidden TextureView so getBitmap() can capture frames.
-    // - IMAGE mode: clear the TextureView; the StyledPlayerView re-attaches ExoPlayer
-    //   to its own surface when it enters the composition.
+    // Track ExoPlayer's playing state for the Play/Pause button
+    DisposableEffect(exoPlayer) {
+        val player = exoPlayer ?: return@DisposableEffect onDispose {}
+        val playbackListener = object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+        }
+        player.addListener(playbackListener)
+        onDispose { player.removeListener(playbackListener) }
+    }
+
+    // Load and play video when URI changes
+    LaunchedEffect(loadedVideoUri, exoPlayer) {
+        val player = exoPlayer ?: return@LaunchedEffect
+        val uri = loadedVideoUri ?: return@LaunchedEffect
+        player.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+        player.prepare()
+        player.play()
+    }
+
+    // Switch ExoPlayer's render target when display mode changes
     LaunchedEffect(displayMode, exoPlayer) {
         val player = exoPlayer ?: return@LaunchedEffect
         when (displayMode) {
-            AsciiDisplayMode.ASCII -> {
-                captureTextureView?.let { player.setVideoTextureView(it) }
-            }
-            AsciiDisplayMode.IMAGE -> {
-                captureTextureView?.let { player.clearVideoTextureView(it) }
-            }
+            AsciiDisplayMode.ASCII -> captureTextureView?.let { player.setVideoTextureView(it) }
+            AsciiDisplayMode.IMAGE -> captureTextureView?.let { player.clearVideoTextureView(it) }
         }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
         val showAscii = displayMode != AsciiDisplayMode.IMAGE
 
+        // Persistent control bar — visible in both IMAGE and ASCII modes
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(onClick = { videoPickerLauncher.launch(arrayOf("video/*")) }) {
+                Icon(Icons.Default.FolderOpen, contentDescription = null)
+                Text("  Load", style = MaterialTheme.typography.labelLarge)
+            }
+            IconButton(
+                onClick = { exoPlayer?.seekTo(0); exoPlayer?.play() },
+                enabled = loadedVideoUri != null
+            ) {
+                Icon(Icons.Default.SkipPrevious, contentDescription = "Restart")
+            }
+            IconButton(
+                onClick = { exoPlayer?.play() },
+                enabled = loadedVideoUri != null && !isPlaying
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = "Play")
+            }
+            IconButton(
+                onClick = { exoPlayer?.pause() },
+                enabled = loadedVideoUri != null && isPlaying
+            ) {
+                Icon(Icons.Default.Pause, contentDescription = "Pause")
+            }
+        }
+
+        // Content area
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
         ) {
-            // Hidden TextureView — always present so ExoPlayer can render decoded frames
-            // to it in ASCII mode. alpha=0f keeps it invisible while the SurfaceTexture
-            // remains active, so getBitmap() still captures frames correctly.
+            // Hidden TextureView for frame capture in ASCII mode (alpha=0 keeps it invisible)
             AndroidView(
                 factory = { ctx ->
                     TextureView(ctx).apply { alpha = 0f }.also { captureTextureView = it }
@@ -132,30 +209,31 @@ fun ExoPlayerVideoFileTab(
                 modifier = Modifier.fillMaxSize()
             )
 
-            if (!showAscii) {
-                // IMAGE mode: StyledPlayerView covers the TextureView and takes over
-                // as ExoPlayer's render target (set via its player property).
-                exoPlayer?.let { player ->
-                    AndroidView(
-                        factory = { ctx ->
-                            StyledPlayerView(ctx).apply {
-                                this.player = player
-                                useController = true
-                                controllerShowTimeoutMs = 5000
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } ?: Box(
+            if (loadedVideoUri == null) {
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("Initializing player...")
+                    Text(
+                        "No video loaded. Tap Load to choose a file.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            } else if (!showAscii) {
+                exoPlayer?.let { player ->
+                    AndroidView(
+                        factory = { ctx ->
+                            StyledPlayerView(ctx).apply {
+                                this.player = player
+                                useController = false
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
             } else {
-                // ASCII mode: render ASCII art over the hidden TextureView.
                 val bitmap = videoBitmap
                 if (bitmap != null) {
                     AsciiGridPreview(
@@ -173,11 +251,12 @@ fun ExoPlayerVideoFileTab(
                             .background(MaterialTheme.colorScheme.surfaceVariant),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("Waiting for video frames...")
+                        Text("Waiting for video frames...", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
         }
     }
 }
+
 
