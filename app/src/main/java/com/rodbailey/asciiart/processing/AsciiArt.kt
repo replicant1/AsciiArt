@@ -57,7 +57,7 @@ object AsciiArt {
             for (x in 0 until width) {
                 val color = pixels[rowOffset + x]
                 val gray = color and 0xFF
-                val index = (gray * (sortedChars.size - 1) / 255f).roundToInt()
+                val index = ((255 - gray) * (sortedChars.size - 1) / 255f).roundToInt()
                     .coerceIn(0, sortedChars.lastIndex)
                 textBuilder.append(sortedChars[index])
             }
