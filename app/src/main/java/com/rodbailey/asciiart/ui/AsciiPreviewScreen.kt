@@ -485,24 +485,42 @@ fun AsciiGridPreview(
             val fontMetrics = textPaint.fontMetrics
             val baselineOffset = (cellHeight - (fontMetrics.bottom - fontMetrics.top)) / 2f - fontMetrics.top
 
+            // Compute charWidth once — same for every character in a monospace font.
+            // Replaces 36K measureText() calls per frame with one.
+            val charWidth = textPaint.measureText(gridWidthSampleChar)
+
+            // Pre-compute the x origin so each character is centred in its cell.
+            val rowStartX = drawOffsetX + (cellWidth - charWidth) / 2f
+
             val nativeCanvas = drawContext.canvas.nativeCanvas
-            for (y in 0 until bitmap.height) {
-                val row = rows.getOrNull(y).orEmpty()
-                val top = drawOffsetY + (y * cellHeight)
-                for (x in 0 until bitmap.width) {
-                    val char = row.getOrElse(x) { ' ' }
-                    val text = char.toString()
-                    val pixelIndex = (y * bitmap.width) + x
-                    textPaint.color = if (colorEnabled) {
-                        asciiColors?.getOrNull(pixelIndex) ?: defaultAsciiColor
-                    } else {
-                        defaultAsciiColor
+
+            if (!colorEnabled) {
+                // Non-colour: draw each row in a single drawText() call (~270 calls/frame
+                // instead of ~36,450). Paint.letterSpacing pads the advance of each glyph
+                // so characters stay centred in their cells.
+                textPaint.color = defaultAsciiColor
+                textPaint.letterSpacing = (cellWidth - charWidth) / textPaint.textSize
+                for (y in 0 until bitmap.height) {
+                    val row = rows.getOrNull(y).orEmpty()
+                    if (row.isEmpty()) continue
+                    val textY = drawOffsetY + (y * cellHeight) + baselineOffset
+                    nativeCanvas.drawText(row, 0, row.length, rowStartX, textY, textPaint)
+                }
+                textPaint.letterSpacing = 0f
+            } else {
+                // Colour mode: must draw per-character for individual colours.
+                // Reuse a CharArray(1) to avoid 36K String allocations per frame.
+                val singleChar = CharArray(1)
+                for (y in 0 until bitmap.height) {
+                    val row = rows.getOrNull(y).orEmpty()
+                    val textY = drawOffsetY + (y * cellHeight) + baselineOffset
+                    for (x in 0 until bitmap.width) {
+                        val pixelIndex = (y * bitmap.width) + x
+                        textPaint.color = asciiColors?.getOrNull(pixelIndex) ?: defaultAsciiColor
+                        singleChar[0] = row.getOrElse(x) { ' ' }
+                        val textX = rowStartX + (x * cellWidth)
+                        nativeCanvas.drawText(singleChar, 0, 1, textX, textY, textPaint)
                     }
-                    val charWidth = textPaint.measureText(text)
-                    val left = drawOffsetX + (x * cellWidth)
-                    val textX = left + ((cellWidth - charWidth) / 2f)
-                    val textY = top + baselineOffset
-                    nativeCanvas.drawText(text, textX, textY, textPaint)
                 }
             }
         }
