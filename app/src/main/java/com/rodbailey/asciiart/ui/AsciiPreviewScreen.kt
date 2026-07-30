@@ -489,7 +489,8 @@ fun AsciiGridPreview(
         }
         offsets
     }
-    val defaultAsciiColor = MaterialTheme.colorScheme.onSurface.toArgb()
+    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+    val defaultAsciiColor = remember(onSurfaceColor) { onSurfaceColor.toArgb() }
     val gridWidthSampleChar = stringResource(R.string.grid_width_sample_char)
     val textPaint = remember {
         AndroidPaint().apply {
