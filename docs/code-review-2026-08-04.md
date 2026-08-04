@@ -3,14 +3,14 @@
 Full read of the ~1,800 lines of Kotlin under `app/src/main`, plus the Gradle config,
 manifest and tests.
 
-**10 of the 12 numbered items are fixed.** Defect 3 and inefficiency 9 remain, along with
-3 entries on the simplification list.
+**11 of the 12 numbered items are fixed.** Inefficiencies 9 and 15 remain, along with
+3 entries on the simplification list. No defects are open.
 
-Three findings arrived after the original review and sit outside its numbering: the
+Four findings arrived after the original review and sit outside its numbering: the
 inverted ASCII glyph density, found while writing tests for item 6; item 13, the cost of
-`toAsciiText`'s per-pixel mapping, found while measuring item 9; and item 14, contrast not
-reaching colour output, found by tracing what the grayscale bitmap is used for. All three
-are fixed.
+`toAsciiText`'s per-pixel mapping, found while measuring item 9; item 14, contrast not
+reaching colour output, found by tracing what the grayscale bitmap is used for; and item 15,
+split out of 14. Items 13 and 14 and the density bug are fixed; 15 is open.
 
 Numbering is otherwise preserved from the original review so items stay traceable across
 the fixes, which is why the fixed list below is not in numeric order.
@@ -134,6 +134,31 @@ They are now `private const val` at file scope, alongside the comment explaining
 cache array's size comes from a `TEXT_METRICS_CACHE_SLOTS` constant rather than a bare `4`,
 so the slot indices and the allocation cannot drift apart.
 
+### 3. Bitmap recycled while still held in Compose state
+
+`ExoPlayerFrameListener` kept the previous frame's processed bitmap in `lastDisplayedBitmap`
+and called `recycle()` on it as soon as the next frame arrived, while that bitmap was still
+the value of `videoBitmap` in Compose state.
+
+**The original finding recorded this as safe-for-now, and that stopped being true.** It read:
+"doesn't crash today only because `AsciiGridPreview` never draws the bitmap — it reads just
+`width` and `height`." That held until item 2 landed. Since then the video tab's Image mode
+renders `Image(bitmap.asImageBitmap())` — the same bitmap, drawn directly — so from that
+point there was a real window in which the UI thread could record a display list referencing
+a bitmap that the next frame then recycled, ~60 ms later. A race rather than a certainty,
+but no longer theoretical.
+
+Both `recycle()` sites are gone and `lastDisplayedBitmap` with them. The processed bitmap's
+lifetime now belongs to the garbage collector, which is what `CameraFrameAnalyzer` has always
+done with the equivalent bitmaps on the camera path — its comment says so explicitly.
+
+The capture pool is untouched and still recycled in `release()`. Those bitmaps have exactly
+one owner at a time and are never handed to Compose, so ending their lifetime is ours to do.
+
+The cost is one ~130 KB bitmap per frame reaching the collector slightly later than before.
+Item 15 would remove most of those allocations outright, which is the better answer than
+recycling something that is still being read.
+
 ### 14. Contrast was not applied to colour output
 
 Not in the original review — found by tracing what the grayscale bitmap is used for when
@@ -165,9 +190,11 @@ Two things this fix does **not** address, both still open:
   pixels into `colorPixels` verbatim while applying contrast only to the grayscale output.
   Unverified — it needs a video file loaded — and the fix would differ, since that path has
   RGB rather than YUV in hand.
-- In Colour + Image mode the entire grayscale bitmap is still computed and discarded:
-  per-pixel contrast arithmetic, a ~130 KB allocation and a `setPixels`, every frame, for a
-  result only two integers are read from.
+- In Colour + Image mode the grayscale bitmap is still built and discarded. Now item 15.
+
+Note that fixing this *narrowed* item 15: before, the per-pixel contrast arithmetic was
+surplus in Colour + Image mode too, because nothing downstream consumed it. It now feeds
+`yuvToArgb`, so only the bitmap itself is wasted.
 
 ### 13. `toAsciiText`'s per-pixel mapping cost 4.4 ms per frame
 
@@ -332,24 +359,97 @@ loaded-but-paused video, or the tab merely being open, now costs nothing.
 
 ---
 
-## ⬜ Open — defects
-
-
-### 3. Bitmap recycled while still held in Compose state
-
-`ExoPlayerFrameCapture.kt:195-196`
-
-`lastDisplayedBitmap?.recycle()` destroys the previous frame's bitmap, which is still the
-value of `videoBitmap` state and may not have been drawn yet. It doesn't crash today only
-because `AsciiGridPreview` never draws the bitmap — it reads just `width` and `height`,
-which stay legal on a recycled bitmap. Anything that starts actually drawing it turns this
-into an immediate `Canvas: trying to use a recycled bitmap`. (Before the dead-code sweep
-the same reprieve came from `drawSourceImage` being `false` at every call site.)
-
----
-
 ## ⬜ Open — inefficiencies
 
+### 15. The grayscale bitmap is built and discarded in Colour + Image mode
+
+`ImageProcessor.kt:155-162` (camera), `ImageProcessor.kt:205-207` (video)
+
+Split out of item 14, where it was noted in passing.
+
+With Colour on and the display in Image mode, nothing reads the grayscale bitmap's pixels.
+`ImagePreview` builds its own bitmap from `asciiColors` and takes only `width` and `height`
+off the grayscale one — two integers, from a full-size image rebuilt every frame.
+
+Per frame at a 135x240 grid the surplus work is:
+
+- packing and storing 32,400 ARGB ints into the luma output buffer;
+- a `Bitmap.createBitmap` of ~130 KB, roughly 3.9 MB/s of allocation at 30fps;
+- a `setPixels` copy of those 32,400 ints, measured at ~0.03 ms.
+
+Both pipelines have the shape — `processLumaFrame` for the camera, `processBitmap` for
+video.
+
+Two things are **not** part of this item:
+
+- **The contrast arithmetic is still needed.** Since item 14, `contrastAdjustedGray` feeds
+  `yuvToArgb`, so it is required for the colour output in every mode. Only the grayscale
+  bitmap is surplus, not the arithmetic that would have filled it.
+- **Colour + ASCII mode is unaffected.** There `toAsciiText` reads the bitmap's pixels to
+  choose glyphs, so it is doing real work even though the bitmap is never displayed.
+
+#### What a fix would look like
+
+The bitmap is doing three unrelated jobs, which is why it looks wasteful — it is being used
+as a transport, not only as an image:
+
+1. **Carrying pixels** to `toAsciiText`, which immediately reads them back out with
+   `getPixels` — that is item 9.
+2. **Carrying grid dimensions** to the UI. `AsciiGridPreview` reads `.width`/`.height`
+   thirteen times and reads pixels zero times.
+3. **Being the thing drawn** — Image mode with Colour off.
+
+Only job 3 needs a `Bitmap`. Remove jobs 1 and 2 and it is needed in exactly one of four
+combinations, and in that one it is not waste at all:
+
+| Display | Colour | Bitmap needed | Why |
+| --- | --- | --- | --- |
+| Image | off | yes | it *is* the displayed image |
+| Image | on | no | the colour bitmap is displayed instead |
+| ASCII | off | no | glyphs come from the pixel array; the UI needs only dimensions |
+| ASCII | on | no | same |
+
+Full-size allocations per frame at a 135x240 grid, ~130 KB each:
+
+| Display | Colour | Now | With the fix |
+| --- | --- | --- | --- |
+| Image | off | 1 bitmap | 1 bitmap (already optimal) |
+| Image | on | 2 bitmaps + 1 array | 1 bitmap + 1 array |
+| ASCII | off | 1 bitmap + 1 array | none |
+| ASCII | on | 1 bitmap + 2 arrays | 1 array |
+
+ASCII mode goes from ~260 KB per frame to no pixel allocations at all — about 7.8 MB/s of
+GC pressure at 30fps — plus the ~0.35 ms of `setPixels` and `getPixels` those lines cost.
+The ASCII `String` itself remains; that is a separate ~65 KB.
+
+The shape that gets there:
+
+```kotlin
+data class FrameProcessingResult(
+    val displayBitmap: Bitmap?,   // null unless Image mode
+    val asciiColors: IntArray?,
+    val gridWidth: Int,
+    val gridHeight: Int,
+)
+```
+
+`ImageProcessor` picks the source once — grayscale or colour — rather than the UI
+re-deriving it, which makes this a simplification as well as an efficiency:
+`ImagePreview(bitmap, modifier)` loses its `colorEnabled`/`asciiColors` branch entirely, and
+`AsciiGridPreview(gridWidth, gridHeight, …)` loses a `Bitmap` parameter whose pixels it never
+read, so its signature stops implying otherwise.
+
+It does not work as a single change. The dependencies run in order:
+
+1. **Item 3** — mandatory, since the fix makes the returned bitmap definitively the drawn
+   one. Now done.
+2. **Item 9** — `toAsciiText` takes pixels and dimensions. This is what frees ASCII mode from
+   needing a bitmap at all, and is where most of the benefit above comes from.
+3. **Item 15** — nullable display bitmap, explicit dimensions, UI signatures follow.
+
+Roughly six files, and the instrumented tests move to the new `toAsciiText` signature. The
+cheap alternative — skip the bitmap only in Colour + Image and leave everything else — is
+worth perhaps a fifth of the above, because it misses ASCII mode entirely.
 
 ### 9. `setPixels` → `getPixels` round trip
 

@@ -57,7 +57,6 @@ class ExoPlayerFrameListener(
 
     private val scope = CoroutineScope(Job() + Dispatchers.Main.immediate)
     private val frameQueue = Channel<Bitmap>(2)
-    private var lastDisplayedBitmap: Bitmap? = null
     private val frameState = FrameQueueState()
 
     /**
@@ -97,8 +96,8 @@ class ExoPlayerFrameListener(
 
     fun release() {
         stopListening()
-        lastDisplayedBitmap?.recycle()
-        lastDisplayedBitmap = null
+        // Only the capture pool is recycled here. Processed frames are handed to Compose
+        // and their lifetime is not ours to end — see processQueuedFrames.
         var pooled = captureBitmapPool.poll()
         while (pooled != null) {
             pooled.recycle()
@@ -192,8 +191,11 @@ class ExoPlayerFrameListener(
                     AsciiDisplayMode.ASCII -> AsciiArt.toAsciiText(frameResult.grayscaleBitmap)
                 }
                 withContext(Dispatchers.Main) {
-                    lastDisplayedBitmap?.recycle()
-                    lastDisplayedBitmap = frameResult.grayscaleBitmap
+                    // The processed bitmap is handed to Compose, which may still hold it in
+                    // a recorded display list after the next frame arrives — Image mode
+                    // draws it directly. Recycling the previous one here was a use-after-free
+                    // waiting to happen, so its lifetime is left to the garbage collector,
+                    // as CameraFrameAnalyzer already does for the same reason.
                     onFrameProcessed(frameResult.grayscaleBitmap, asciiText, frameResult.asciiColors)
                 }
             } catch (e: Exception) {
