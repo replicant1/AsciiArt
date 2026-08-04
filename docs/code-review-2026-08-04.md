@@ -3,14 +3,21 @@
 Full read of the ~1,800 lines of Kotlin under `app/src/main`, plus the Gradle config,
 manifest and tests.
 
-Line references are pinned to the commit that removed the dead code listed below.
-Numbering is preserved from the original review so items stay traceable; items 1 and 6,
-and most of the dead-code list, have since been fixed.
+**10 of the 12 numbered items are fixed.** Defect 3 and inefficiency 9 remain, along with
+8 entries on the simplification list. One bug not in the original review — the inverted
+ASCII glyph density — was found while writing tests for item 6 and is recorded below.
+
+Numbering is preserved from the original review so items stay traceable across the fixes,
+which is why the fixed list below is not in numeric order.
 
 | Status | Meaning |
-|---|---|
-| ✅ Fixed | Landed on `main`, commit noted |
+| --- | --- |
+| ✅ Fixed | Fix is in the tree. A commit is cited where the item maps to a single commit; the later fixes were grouped, so most are not. |
 | ⬜ Open | Still present |
+
+Line references describe the current state of the tree, not the state at review time — the
+fixes have shifted them repeatedly. Every `File.kt:NNN` below is checked mechanically
+against the file it names, so a reference that has drifted is a bug in this document.
 
 ---
 
@@ -48,9 +55,9 @@ delegates to `sortedWith(compareBy(selector))`, and `compareBy` invokes its sele
 ~2n log n times instead of n. For the 95-character PRINTABLE set that is roughly 1,200
 measurements instead of 95.
 
-### Dead code in the render and frame-queue paths
+### Dead code in the render and frame-queue paths — `5bae97a`
 
-Removed in the same commit as this document:
+Code that was never executed or never read:
 
 - `FrameQueueState.shouldProcessFrame`, `recordProcessedFrame` and `lastProcessedTimeMs` —
   no production caller. Their six unit tests went too, taking `FrameQueueStateTest` from
@@ -228,8 +235,10 @@ the ASCII mapper skips two copies and a per-frame allocation.
 - **`READ_EXTERNAL_STORAGE` in the manifest** — the app uses SAF (`OpenDocument` +
   `takePersistableUriPermission`), which grants per-URI access. The permission is never requested
   at runtime and grants nothing on API 24+.
-- **ExoPlayer 2.19.1** is end-of-life; every usage warns as deprecated (`ExoPlayer`, `MediaItem`,
-  `Player`, `StyledPlayerView`). `androidx.media3` is the maintained successor.
+- **ExoPlayer 2.19.1** is end-of-life; every remaining usage warns as deprecated (`ExoPlayer`,
+  `MediaItem`, `Player`). `androidx.media3` is the maintained successor. The item 2 fix removed
+  the `StyledPlayerView` usage, so the migration surface is now `ExoPlayerFrameCapture` and
+  `VideoFilePlayer` only.
 
 ---
 
