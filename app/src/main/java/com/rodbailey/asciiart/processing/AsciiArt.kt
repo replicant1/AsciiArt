@@ -91,6 +91,12 @@ object AsciiArt {
      * scratch objects (Bitmap, Canvas, Paint, Rect, IntArray) reused across every
      * character — replacing the previous approach that allocated all of these fresh
      * for each of the 95–200 characters in the set.
+     *
+     * Each density is measured exactly once, up front, and the sort then runs over the
+     * pre-computed values. Measuring inside sortedBy {} would redo the draw + getPixels
+     * work on every comparison: sortedBy delegates to compareBy, which invokes its
+     * selector on both operands of each of the ~n log n comparisons, so a 95-character
+     * set cost ~1,200 measurements instead of 95.
      */
     private fun buildSortedCharset(preset: AsciiCharsetPreset): List<Char> {
         val chars = buildCharacterSet(preset)
@@ -104,8 +110,9 @@ object AsciiArt {
         val scratchPixels = IntArray(densityGridWidth * densityGridHeight)
         val scratchBounds = Rect()
         val scratchChar = CharArray(1)
-        return try {
-            chars.sortedBy { char ->
+        val densities = try {
+            FloatArray(chars.size) { index ->
+                val char = chars[index]
                 if (char == ' ') {
                     0f
                 } else {
@@ -122,5 +129,6 @@ object AsciiArt {
         } finally {
             scratchBitmap.recycle()
         }
+        return chars.indices.sortedBy { densities[it] }.map { chars[it] }
     }
 }

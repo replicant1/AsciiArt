@@ -13,14 +13,90 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Verifies how [AsciiArt] maps pixel intensity onto its density-sorted character set.
+ * Verifies that [AsciiArt] orders its character set by ascending visual density.
  *
  * These are instrumented tests because the density measurement draws each glyph with a
  * real [Canvas] and [Paint] onto a real [Bitmap] — none of which have usable behaviour
  * under the local JVM's stubbed android.jar.
+ *
+ * [AsciiArt.buildSortedCharset] is private, but the sorted charset is fully recoverable
+ * through the public [AsciiArt.toAsciiText]: that function maps pixel intensity to a
+ * charset index monotonically and without skipping indices, so feeding it every possible
+ * intensity yields every character in sorted order. See [recoverSortedCharset].
  */
 @RunWith(AndroidJUnit4::class)
 class AsciiArtInstrumentedTest {
+
+    @Test
+    fun sortedCharset_isAPermutationOfPrintableAscii() {
+        val sorted = recoverSortedCharset()
+
+        assertEquals(
+            "charset should contain every printable ASCII character exactly once",
+            (32..126).map { it.toChar() }.toSet(),
+            sorted.toSet()
+        )
+        assertEquals("charset should contain no duplicates", 95, sorted.size)
+    }
+
+    @Test
+    fun sortedCharset_startsWithSpace() {
+        assertEquals(
+            "space is the least dense glyph and must sort first",
+            ' ',
+            recoverSortedCharset().first()
+        )
+    }
+
+    /**
+     * The core invariant: the charset is sorted by ascending ink coverage. Coverage is
+     * re-measured here independently of the production sort, so a broken comparator or a
+     * mis-indexed sort surfaces as an out-of-order pair.
+     */
+    @Test
+    fun sortedCharset_isOrderedByAscendingInkCoverage() {
+        val sorted = recoverSortedCharset()
+        val coverage = sorted.map { it to inkCoverage(it) }
+
+        for (i in 1 until coverage.size) {
+            val (previousChar, previousCoverage) = coverage[i - 1]
+            val (currentChar, currentCoverage) = coverage[i]
+            assertTrue(
+                "'$previousChar' (coverage $previousCoverage) sorts before '$currentChar' " +
+                    "(coverage $currentCoverage) but is denser",
+                currentCoverage >= previousCoverage - COVERAGE_TOLERANCE
+            )
+        }
+    }
+
+    /**
+     * A human-readable sanity check on the outcome of the sort: heavy glyphs land in the
+     * dense half of the ramp and hairline glyphs land in the sparse half.
+     */
+    @Test
+    fun sortedCharset_placesHeavyGlyphsInTheDenseHalf() {
+        val sorted = recoverSortedCharset()
+        val midpoint = sorted.size / 2
+
+        for (dense in listOf('@', '#', 'M', 'W')) {
+            assertTrue(
+                "'$dense' should sort into the dense half but sits at index ${sorted.indexOf(dense)}",
+                sorted.indexOf(dense) > midpoint
+            )
+        }
+        for (sparse in listOf('.', ',', '\'', '`', ':')) {
+            assertTrue(
+                "'$sparse' should sort into the sparse half but sits at index ${sorted.indexOf(sparse)}",
+                sorted.indexOf(sparse) < midpoint
+            )
+        }
+    }
+
+    /** The charset is cached after first use; the cache must not perturb the ordering. */
+    @Test
+    fun sortedCharset_isStableAcrossRepeatedCalls() {
+        assertEquals(recoverSortedCharset(), recoverSortedCharset())
+    }
 
     /**
      * ASCII mode draws white glyphs on a black background with no display-time inversion,
@@ -100,7 +176,7 @@ class AsciiArtInstrumentedTest {
     /**
      * Fraction of the cell a glyph inks when drawn white on black. Deliberately mirrors
      * the measurement in AsciiArt.buildSortedCharset so that the assertions test the
-     * mapping and ordering rather than the measurement itself.
+     * ordering rather than the (unchanged) measurement itself.
      */
     private fun inkCoverage(char: Char): Float {
         if (char == ' ') return 0f
