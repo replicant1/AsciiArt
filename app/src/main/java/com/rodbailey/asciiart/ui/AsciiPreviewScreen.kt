@@ -48,8 +48,6 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.rodbailey.asciiart.R
 import androidx.compose.foundation.BorderStroke
@@ -244,7 +242,6 @@ private fun CameraTabContent(
                         asciiText = liveAsciiText,
                         asciiColors = liveAsciiColors,
                         colorEnabled = colorEnabled,
-                        drawSourceImage = false,
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
@@ -475,7 +472,6 @@ fun AsciiGridPreview(
     asciiText: String,
     asciiColors: IntArray?,
     colorEnabled: Boolean,
-    drawSourceImage: Boolean,
     modifier: Modifier,
 ) {
     // Build an IntArray of row-start indices by scanning asciiText once for '\n'.
@@ -498,7 +494,6 @@ fun AsciiGridPreview(
         }
         offsets
     }
-    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
     val defaultAsciiColor = Color.White.toArgb()
     val gridWidthSampleChar = stringResource(R.string.grid_width_sample_char)
     val textPaint = remember {
@@ -507,7 +502,6 @@ fun AsciiGridPreview(
             typeface = android.graphics.Typeface.MONOSPACE
         }
     }
-    textPaint.color = defaultAsciiColor
 
     // Pre-allocated FontMetrics — avoids the new FontMetrics() allocation on every frame
     // that textPaint.fontMetrics produces. getFontMetrics(existing) fills it in-place.
@@ -532,7 +526,6 @@ fun AsciiGridPreview(
     Canvas(
         modifier = modifier.background(Color.Black)
     ) {
-        val imageBitmap = bitmap.asImageBitmap()
         val sourceWidth = bitmap.width.toFloat()
         val sourceHeight = bitmap.height.toFloat()
         val sourceAspect = sourceWidth / sourceHeight
@@ -553,15 +546,6 @@ fun AsciiGridPreview(
             drawHeight = drawWidth / sourceAspect
             drawOffsetX = 0f
             drawOffsetY = (size.height - drawHeight) / 2f
-        }
-
-        if (drawSourceImage) {
-            drawImage(
-                image = imageBitmap,
-                dstOffset = IntOffset(drawOffsetX.toInt(), drawOffsetY.toInt()),
-                dstSize = IntSize(drawWidth.toInt(), drawHeight.toInt()),
-                filterQuality = FilterQuality.None
-            )
         }
 
         if (asciiText.isNotEmpty()) {
