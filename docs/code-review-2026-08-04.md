@@ -4,7 +4,7 @@ Full read of the ~1,800 lines of Kotlin under `app/src/main`, plus the Gradle co
 manifest and tests.
 
 **10 of the 12 numbered items are fixed.** Defect 3 and inefficiency 9 remain, along with
-4 entries on the simplification list.
+3 entries on the simplification list.
 
 Two findings arrived after the original review and sit outside its numbering, both now
 fixed: the inverted ASCII glyph density, found while writing tests for item 6; and item 13,
@@ -106,6 +106,19 @@ recompositions. The lambda does run per drag event, but no recomposition follows
 `SnapshotMutableIntStateImpl` compares before writing and skips the notification when the
 value is unchanged. Adding `steps` would also make the slider snap and draw 45 tick marks,
 so it was not worth doing for a cost that does not exist.
+
+### Hardcoded UI strings extracted
+
+Nine user-visible strings bypassed `strings.xml`, which the rest of the screen already used
+consistently: the two tab labels, the Load button, the "no video loaded" and "waiting for
+video frames" placeholders, and four `contentDescription`s — Restart, Play, Pause and the
+processed-image preview. The last four matter beyond translation, since they are what a
+screen reader announces.
+
+The Load button's label was `"  Load"`, using two leading spaces to separate it from its
+icon. That could not move into a resource as-is — aapt strips leading and trailing
+whitespace from string values unless they are quoted — so the spacing is now a
+`Spacer(Modifier.width(8.dp))`, which is what it should have been.
 
 ### Composable-local constants hoisted to file scope
 
@@ -313,14 +326,11 @@ the ASCII mapper skips two copies and a per-frame allocation.
 
 ## ⬜ Open — dead code and simplification
 
-- **`VideoFilePlayer.kt:59, 68-75, 104-131`** — `exoPlayer` as `mutableStateOf` set from inside
+- **`VideoFilePlayer.kt:63, 72-79, 108-135`** — `exoPlayer` as `mutableStateOf` set from inside
   `DisposableEffect` forces an extra recomposition round-trip that every downstream effect then
   has to null-guard; `remember { ExoPlayer.Builder(context).build() }` removes the nullability
   and the guards. The three `rememberUpdatedState` setter wrappers are also unnecessary — a
   lambda capturing a `MutableState` delegate stays valid across recomposition.
-- **Hardcoded UI strings** — "Live Camera", "Video File", "Load", "No video loaded…", "Waiting for
-  video frames…", and the Play/Pause/Restart `contentDescription`s bypass `strings.xml`, which the
-  rest of the screen uses consistently.
 - **`READ_EXTERNAL_STORAGE` in the manifest** — the app uses SAF (`OpenDocument` +
   `takePersistableUriPermission`), which grants per-URI access. The permission is never requested
   at runtime and grants nothing on API 24+.
@@ -339,8 +349,9 @@ down to 10 tests after the dead-code sweep and now covers only code the app actu
 Camera frame rotation used to be untestable Android code; extracting `rotationMap` as pure
 arithmetic put it under JVM unit test (`RotationMapTest`, 5 tests). Still uncovered:
 
-- **`ImagePreview`** — no tests at all, despite now carrying both the item 1 and item 8 fixes,
-  neither of which was verified by anything but reading. A Compose `captureToImage()` test
+- **`ImagePreview`** — no tests at all, despite carrying both the item 1 and item 8 fixes. Both
+  have since been confirmed by eye on a Pixel 3, in grayscale and in colour, but by screenshot
+  rather than by anything that would catch a regression. A Compose `captureToImage()` test
   asserting a white input pixel renders white would close the gap, and would have caught the
   original `268b241` regression.
 - **`ImageProcessor.processLumaFrame` / `processBitmap`** — the loops themselves are untested;

@@ -9,6 +9,17 @@
     <string name="ascii_preview_ascii_button">ASCII</string>
     <string name="ascii_preview_colour_label">Colour</string>
     <string name="ascii_preview_waiting_for_frames">Waiting for frames...</string>
+    <string name="ascii_preview_tab_live_camera">Live Camera</string>
+    <string name="ascii_preview_tab_video_file">Video File</string>
+    <string name="ascii_preview_image_content_description">Processed image preview</string>
+
+    <!-- Video File Tab -->
+    <string name="video_file_load_button">Load</string>
+    <string name="video_file_restart_button">Restart</string>
+    <string name="video_file_play_button">Play</string>
+    <string name="video_file_pause_button">Pause</string>
+    <string name="video_file_none_loaded">No video loaded. Tap Load to choose a file.</string>
+    <string name="video_file_waiting_for_frames">Waiting for video frames...</string>
 
     <!-- Camera Permissions -->
     <string name="camera_permission_request_button">Grant permission</string>

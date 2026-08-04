@@ -13,9 +13,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Pause
@@ -37,11 +39,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.Player
+import com.rodbailey.asciiart.R
 import com.rodbailey.asciiart.processing.AsciiDisplayMode
 import com.rodbailey.asciiart.processing.ExoPlayerFrameListener
 
@@ -170,26 +174,40 @@ fun ExoPlayerVideoFileTab(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Button(onClick = { videoPickerLauncher.launch(arrayOf("video/*")) }) {
+                // The icon is decorative — the adjacent label already names the action.
                 Icon(Icons.Default.FolderOpen, contentDescription = null)
-                Text("  Load", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.video_file_load_button),
+                    style = MaterialTheme.typography.labelLarge
+                )
             }
             IconButton(
                 onClick = { exoPlayer?.seekTo(0); exoPlayer?.play() },
                 enabled = loadedVideoUri != null
             ) {
-                Icon(Icons.Default.SkipPrevious, contentDescription = "Restart")
+                Icon(
+                    Icons.Default.SkipPrevious,
+                    contentDescription = stringResource(R.string.video_file_restart_button)
+                )
             }
             IconButton(
                 onClick = { exoPlayer?.play() },
                 enabled = loadedVideoUri != null && !isPlaying
             ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "Play")
+                Icon(
+                    Icons.Default.PlayArrow,
+                    contentDescription = stringResource(R.string.video_file_play_button)
+                )
             }
             IconButton(
                 onClick = { exoPlayer?.pause() },
                 enabled = loadedVideoUri != null && isPlaying
             ) {
-                Icon(Icons.Default.Pause, contentDescription = "Pause")
+                Icon(
+                    Icons.Default.Pause,
+                    contentDescription = stringResource(R.string.video_file_pause_button)
+                )
             }
         }
 
@@ -217,7 +235,7 @@ fun ExoPlayerVideoFileTab(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "No video loaded. Tap Load to choose a file.",
+                        stringResource(R.string.video_file_none_loaded),
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
@@ -247,7 +265,10 @@ fun ExoPlayerVideoFileTab(
                             .background(MaterialTheme.colorScheme.surfaceVariant),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("Waiting for video frames...", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            stringResource(R.string.video_file_waiting_for_frames),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                     }
                 }
             }
