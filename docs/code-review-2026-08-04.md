@@ -62,22 +62,39 @@ Removed in the same commit as this document:
 - The composition-time `textPaint.color` assignment — both draw paths set the colour
   themselves before any `drawText`, so it never survived to a draw.
 
+### 2. Video tab ignored the pipeline entirely in Image mode
+
+`pollForFrames` only captured when `displayMode == ASCII`, and the Image branch handed the
+surface to a `StyledPlayerView`. Image mode on the video tab was plain playback — no
+de-res, no contrast, and the Scale and Contrast sliders did nothing — while the same mode
+on the camera tab showed the processed grid.
+
+Capture now runs whenever the player is playing, and the Image branch renders
+`ImagePreview` with the same arguments the camera tab passes it. `StyledPlayerView` is
+gone. Only the ASCII text conversion is mode-dependent, so `processQueuedFrames` skips
+`toAsciiText` in Image mode.
+
+Image mode costs more than it did — a GPU→CPU `getBitmap` plus a full `processBitmap` pass
+per frame, where it previously rendered direct. That is inherent to applying the pipeline.
+
+### 5. `captureTextureView` was not a key of the effect that consumed it
+
+Fixed as a consequence of item 2. With both modes rendering from captured frames,
+ExoPlayer's render target no longer changes with `displayMode`, so the render-target
+effect rekeyed from `(displayMode, exoPlayer)` to `(exoPlayer, captureTextureView)`.
+
+The `AndroidView` factory assigns `captureTextureView` after the first composition. Under
+the old keys, if it arrived after that effect's last run, `setVideoTextureView` never
+fired and the ASCII view sat on "Waiting for video frames..." until the user toggled the
+mode. Keying on the TextureView makes the ordering irrelevant.
+
 ---
 
 ## ⬜ Open — defects
 
-### 2. Video tab ignores the pipeline entirely in Image mode
-
-`ExoPlayerFrameCapture.kt:89`, `VideoFilePlayer.kt:224-235`
-
-`pollForFrames` only captures when `displayMode == ASCII`, and the Image branch renders a
-raw `StyledPlayerView`. On the Video tab in Image mode you get normal video playback — no
-de-res, no contrast, and the Scale and Contrast sliders do nothing. The README claims both
-tabs apply the same pipeline.
-
 ### 3. Bitmap recycled while still held in Compose state
 
-`ExoPlayerFrameCapture.kt:162-163`
+`ExoPlayerFrameCapture.kt:169-170`
 
 `lastDisplayedBitmap?.recycle()` destroys the previous frame's bitmap, which is still the
 value of `videoBitmap` state and may not have been drawn yet. It doesn't crash today only
@@ -95,16 +112,6 @@ copies before the buffer is reused. The `else ->` branch returns `colors` — th
 `lumaColorPixels` singleton — straight to Compose state, where the next frame overwrites
 it mid-draw. Only reachable if `rotationDegrees` isn't a multiple of 90 (CameraX doesn't
 currently produce that), but it silently breaks the stated contract.
-
-### 5. `captureTextureView` is not a key of the effect that consumes it
-
-`VideoFilePlayer.kt:154-160`
-
-The `AndroidView` factory (`:207`) assigns `captureTextureView` as a side effect, but
-`LaunchedEffect(displayMode, exoPlayer)` only re-runs when those two change. If the
-TextureView lands after the last run of that effect, `setVideoTextureView` never fires and
-the ASCII view sits on "Waiting for video frames..." until the user toggles Image/ASCII.
-Adding `captureTextureView` to the keys makes it order-independent.
 
 ---
 
@@ -153,7 +160,7 @@ doing.
 
 ### 12. 60Hz main-thread poll that never stops
 
-`ExoPlayerFrameCapture.kt:87-102`
+`ExoPlayerFrameCapture.kt:91-105`
 
 The `while(true) { … delay(16) }` loop runs for the whole lifetime of the Video tab even
 with no video loaded and the player paused. Gating it on
@@ -168,7 +175,7 @@ with no video loaded and the player paused. Gating it on
   whether the `preset` parameter should go entirely; that is a design call, not a no-brainer.
 - **`VideoFileTabContent`** (`AsciiPreviewScreen.kt:266`) — a pure pass-through to
   `ExoPlayerVideoFileTab`. Simplification rather than dead code, since it is executed.
-- **`VideoFilePlayer.kt:60, 69-76, 105-132`** — `exoPlayer` as `mutableStateOf` set from inside
+- **`VideoFilePlayer.kt:59, 68-75, 104-131`** — `exoPlayer` as `mutableStateOf` set from inside
   `DisposableEffect` forces an extra recomposition round-trip that every downstream effect then
   has to null-guard; `remember { ExoPlayer.Builder(context).build() }` removes the nullability
   and the guards. The three `rememberUpdatedState` setter wrappers are also unnecessary — a
