@@ -152,12 +152,12 @@ fun AsciiPreviewScreen() {
             Tab(
                 selected = selectedTab == 0,
                 onClick = { selectedTab = 0 },
-                text = { Text("Live Camera") }
+                text = { Text(stringResource(R.string.ascii_preview_tab_live_camera)) }
             )
             Tab(
                 selected = selectedTab == 1,
                 onClick = { selectedTab = 1 },
-                text = { Text("Video File") }
+                text = { Text(stringResource(R.string.ascii_preview_tab_video_file)) }
             )
         }
         
@@ -439,7 +439,7 @@ fun ImagePreview(
     // FilterQuality.None is what keeps the cells blocky rather than interpolated.
     Image(
         bitmap = source.asImageBitmap(),
-        contentDescription = "Processed image preview",
+        contentDescription = stringResource(R.string.ascii_preview_image_content_description),
         modifier = modifier.background(Color.Black),
         contentScale = ContentScale.Fit,
         filterQuality = FilterQuality.None
