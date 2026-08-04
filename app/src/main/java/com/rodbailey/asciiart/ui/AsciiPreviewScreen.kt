@@ -41,8 +41,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.nativeCanvas
@@ -411,13 +409,15 @@ private fun CameraAnalysisPipeline(
     }
 }
 
-/** Inverts the R, G, B channels of an ARGB colour, preserving alpha. */
-private fun invertArgb(argb: Int): Int =
-    (argb and 0xFF000000.toInt()) or
-    ((255 - ((argb shr 16) and 0xFF)) shl 16) or
-    ((255 - ((argb shr 8) and 0xFF)) shl 8) or
-    (255 - (argb and 0xFF))
-
+/**
+ * Renders the de-res grid as coloured cells (Colour on) or as the grayscale bitmap
+ * (Colour off).
+ *
+ * Both branches draw the scene as captured — no inversion. Only the letterbox
+ * background is black, to match the surrounding UI. ASCII mode needs its glyph density
+ * to track brightness because ink on a black background *is* the light, but Image mode
+ * paints the luminance directly, so inverting it just yields a photographic negative.
+ */
 @Composable
 fun ImagePreview(
     bitmap: Bitmap,
@@ -452,28 +452,19 @@ fun ImagePreview(
                 val top = drawOffsetY + y * cellHeight
                 val bottom = top + cellHeight
                 for (x in 0 until bitmap.width) {
-                    cellPaint.color = invertArgb(asciiColors[(y * bitmap.width) + x])
+                    cellPaint.color = asciiColors[(y * bitmap.width) + x]
                     val left = drawOffsetX + x * cellWidth
                     nativeCanvas.drawRect(left, top, left + cellWidth, bottom, cellPaint)
                 }
             }
         }
     } else {
-        val invertMatrix = remember {
-            ColorMatrix(floatArrayOf(
-                -1f,  0f,  0f, 0f, 255f,
-                 0f, -1f,  0f, 0f, 255f,
-                 0f,  0f, -1f, 0f, 255f,
-                 0f,  0f,  0f, 1f,   0f
-            ))
-        }
         Image(
             bitmap = bitmap.asImageBitmap(),
             contentDescription = "Processed image preview",
             modifier = modifier.background(Color.Black),
             contentScale = ContentScale.Fit,
-            filterQuality = FilterQuality.None,
-            colorFilter = ColorFilter.colorMatrix(invertMatrix)
+            filterQuality = FilterQuality.None
         )
     }
 }

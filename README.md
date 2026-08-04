@@ -52,8 +52,8 @@ This project was created as an exploration of **GitHub Copilot’s capability** 
 ## ASCII mapping algorithm
 For each de-res cell:
 1. Use the cell grayscale intensity (0..255).
-2. Invert the intensity: `mappedValue = 255 - intensity`. This ensures that bright areas of the scene map to dense characters (e.g. `@`, `#`) and dark areas map to sparse characters (e.g. space, `.`), which is correct for white-on-black display.
-3. Map that inverted value to an index in a density-sorted printable ASCII character list.
+2. Map the intensity directly onto an index in the density-sorted printable ASCII character list, which runs from sparsest to densest: `index = intensity * (charCount - 1) / 255`.
+3. Because the list ascends in density, bright areas of the scene reach the dense end (e.g. `@`, `#`) and dark areas stay near the sparse end (e.g. `.`, space) — which is correct for the white-on-black display, where ink means light. Do **not** invert the intensity to `255 - intensity`: that blanks out the bright parts of the scene and inks the dark ones.
 4. Render the selected character at the corresponding on-screen cell bounds.
 
 Character choice logic does **not** change when Colour is enabled; colour is applied as an additional rendering layer.
