@@ -128,12 +128,12 @@ object ImageProcessor {
                 val lumaIndex = rowOffset + (sourceX * pixelStride)
                 val gray = lumaBuffer.get(lumaIndex).toInt() and 0xFF
                 val contrastedGray = (((gray - 128f) * contrast) + 128f).coerceIn(0f, 255f)
-                val adjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
+                val contrastAdjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
                 val outIndex = rotatedRowBase + (rotation.stepX * x)
                 lumaOutputPixels[outIndex] = (0xFF shl 24) or
-                    (adjustedGray shl 16) or
-                    (adjustedGray shl 8) or
-                    adjustedGray
+                    (contrastAdjustedGray shl 16) or
+                    (contrastAdjustedGray shl 8) or
+                    contrastAdjustedGray
 
                 if (colorEnabled) {
                     val uvX = sourceX / 2
@@ -142,7 +142,12 @@ object ImageProcessor {
                     val vIndex = (uvY * vPlane.rowStride) + (uvX * vPlane.pixelStride)
                     val uValue = uBuffer.get(uIndex).toInt() and 0xFF
                     val vValue = vBuffer.get(vIndex).toInt() and 0xFF
-                    colorPixels?.set(outIndex, yuvToArgb(gray, uValue, vValue))
+                    // Contrast-adjusted luma, not the raw sample. Passing `gray` here left
+                    // the Contrast slider with no effect at all in Colour + Image mode,
+                    // where the displayed pixels come from this array alone. Chroma (U, V)
+                    // is deliberately untouched, so contrast changes brightness separation
+                    // without shifting hue or saturation.
+                    colorPixels?.set(outIndex, yuvToArgb(contrastAdjustedGray, uValue, vValue))
                 }
             }
         }
@@ -189,12 +194,12 @@ object ImageProcessor {
             // Convert RGB to grayscale (luminance)
             val gray = (0.299f * r + 0.587f * g + 0.114f * b).toInt()
             val contrastedGray = (((gray - 128f) * contrast) + 128f).coerceIn(0f, 255f)
-            val adjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
+            val contrastAdjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
 
             bitmapOutputPixels[i] = (0xFF shl 24) or
-                (adjustedGray shl 16) or
-                (adjustedGray shl 8) or
-                adjustedGray
+                (contrastAdjustedGray shl 16) or
+                (contrastAdjustedGray shl 8) or
+                contrastAdjustedGray
         }
 
         val grayscaleBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
