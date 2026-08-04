@@ -422,48 +422,29 @@ fun ImagePreview(
     asciiColors: IntArray? = null,
     modifier: Modifier = Modifier
 ) {
-    if (colorEnabled && asciiColors != null) {
-        val cellPaint = remember { AndroidPaint() }
-        Canvas(modifier = modifier.background(Color.Black)) {
-            val sourceAspect = bitmap.width.toFloat() / bitmap.height.toFloat()
-            val canvasAspect = size.width / size.height
-            val drawWidth: Float
-            val drawHeight: Float
-            val drawOffsetX: Float
-            val drawOffsetY: Float
-            if (canvasAspect > sourceAspect) {
-                drawHeight = size.height
-                drawWidth = drawHeight * sourceAspect
-                drawOffsetX = (size.width - drawWidth) / 2f
-                drawOffsetY = 0f
-            } else {
-                drawWidth = size.width
-                drawHeight = drawWidth / sourceAspect
-                drawOffsetX = 0f
-                drawOffsetY = (size.height - drawHeight) / 2f
-            }
-            val cellWidth = drawWidth / bitmap.width
-            val cellHeight = drawHeight / bitmap.height
-            val nativeCanvas = drawContext.canvas.nativeCanvas
-            for (y in 0 until bitmap.height) {
-                val top = drawOffsetY + y * cellHeight
-                val bottom = top + cellHeight
-                for (x in 0 until bitmap.width) {
-                    cellPaint.color = asciiColors[(y * bitmap.width) + x]
-                    val left = drawOffsetX + x * cellWidth
-                    nativeCanvas.drawRect(left, top, left + cellWidth, bottom, cellPaint)
-                }
-            }
-        }
+    // Colour mode paints the sampled cell colours, grayscale mode the luma bitmap. Either
+    // way it is one small image — 135x240 at scaleFactor 8 on a Pixel 3 — scaled up with
+    // no filtering, so cells stay hard-edged. Colour mode used to draw that by hand, one
+    // drawRect per cell: 32,400 canvas ops per frame, ~972,000/sec at 30fps.
+    //
+    // asciiColors may be longer than width * height, because the camera path's shared
+    // buffer is only ever grown. createBitmap needs the array to be *at least* that large
+    // and ignores the tail, matching the old asciiColors[(y * width) + x] indexing.
+    val source = if (colorEnabled && asciiColors != null) {
+        Bitmap.createBitmap(asciiColors, bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
     } else {
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = "Processed image preview",
-            modifier = modifier.background(Color.Black),
-            contentScale = ContentScale.Fit,
-            filterQuality = FilterQuality.None
-        )
+        bitmap
     }
+
+    // ContentScale.Fit performs the same aspect-fit-and-centre the manual loop did, and
+    // FilterQuality.None is what keeps the cells blocky rather than interpolated.
+    Image(
+        bitmap = source.asImageBitmap(),
+        contentDescription = "Processed image preview",
+        modifier = modifier.background(Color.Black),
+        contentScale = ContentScale.Fit,
+        filterQuality = FilterQuality.None
+    )
 }
 
 @Composable
