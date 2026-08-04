@@ -371,12 +371,13 @@ Per frame at a 135x240 grid the surplus work is:
 Both pipelines have the shape — `processLumaFrame` for the camera, `processBitmap` for
 video.
 
-The contrast arithmetic is **not** surplus. Since item 14, `contrastAdjustedGray` feeds
-`yuvToArgb`, so it is needed for the colour output whatever the mode. Only the grayscale
-*bitmap* is.
+Two things are **not** part of this item:
 
-Nor does this apply to Colour + ASCII mode: there `toAsciiText` reads the bitmap's pixels to
-choose glyphs, so it is doing real work even though it is never displayed.
+- **The contrast arithmetic is still needed.** Since item 14, `contrastAdjustedGray` feeds
+  `yuvToArgb`, so it is required for the colour output in every mode. Only the grayscale
+  bitmap is surplus, not the arithmetic that would have filled it.
+- **Colour + ASCII mode is unaffected.** There `toAsciiText` reads the bitmap's pixels to
+  choose glyphs, so it is doing real work even though the bitmap is never displayed.
 
 Any fix has to answer where the dimensions then come from. `ImageProcessor` does not know
 the display mode — `CameraFrameAnalyzer` and `ExoPlayerFrameListener` do — so it would need
