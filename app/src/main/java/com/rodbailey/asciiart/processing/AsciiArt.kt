@@ -13,13 +13,16 @@ enum class AsciiDisplayMode {
     ASCII
 }
 
-enum class AsciiCharsetPreset {
-    PRINTABLE,
-    EXTENDED
-}
-
 object AsciiArt {
-    private val sortedCharsetCache = mutableMapOf<AsciiCharsetPreset, List<Char>>()
+    /**
+     * Printable ASCII sorted by visual density, built once on first use.
+     *
+     * `by lazy` rather than a map keyed by charset: there is only one charset, and its
+     * default SYNCHRONIZED mode makes initialisation safe from either pipeline — the
+     * camera analysis executor and the video IO dispatcher both reach this.
+     */
+    private val densitySortedChars: List<Char> by lazy { buildSortedCharset() }
+
     private const val densityGridWidth = 24
     private const val densityGridHeight = 24
     private const val densityTextSizePx = 20f
@@ -37,11 +40,10 @@ object AsciiArt {
      * of the original grayscale image.
      *
      * @param grayscaleBitmap The input grayscale bitmap (expected to be a small de-res grid, e.g., 32×18 pixels)
-     * @param preset The character set to use (PRINTABLE or EXTENDED ASCII)
      * @return A multi-line ASCII string with dimensions matching the input bitmap
      */
-    fun toAsciiText(grayscaleBitmap: Bitmap, preset: AsciiCharsetPreset): String {
-        val sortedChars = sortedCharsetCache.getOrPut(preset) { buildSortedCharset(preset) }
+    fun toAsciiText(grayscaleBitmap: Bitmap): String {
+        val sortedChars = densitySortedChars
         if (sortedChars.isEmpty()) {
             return ""
         }
@@ -72,25 +74,11 @@ object AsciiArt {
         return textBuilder.toString()
     }
 
-    private fun buildCharacterSet(preset: AsciiCharsetPreset): List<Char> = when (preset) {
-        AsciiCharsetPreset.PRINTABLE -> (32..126).map { it.toChar() }
-        AsciiCharsetPreset.EXTENDED -> {
-            val chars = mutableListOf<Char>()
-            for (code in 32..255) {
-                val char = code.toChar()
-                if (!char.isISOControl()) {
-                    chars += char
-                }
-            }
-            chars
-        }
-    }
-
     /**
-     * Sorts the character set for [preset] by visual density using a single set of
-     * scratch objects (Bitmap, Canvas, Paint, Rect, IntArray) reused across every
-     * character — replacing the previous approach that allocated all of these fresh
-     * for each of the 95–200 characters in the set.
+     * Sorts printable ASCII by visual density using a single set of scratch objects
+     * (Bitmap, Canvas, Paint, Rect, IntArray) reused across every character — replacing
+     * the previous approach that allocated all of these fresh for each of the 95
+     * characters in the set.
      *
      * Each density is measured exactly once, up front, and the sort then runs over the
      * pre-computed values. Measuring inside sortedBy {} would redo the draw + getPixels
@@ -98,8 +86,8 @@ object AsciiArt {
      * selector on both operands of each of the ~n log n comparisons, so a 95-character
      * set cost ~1,200 measurements instead of 95.
      */
-    private fun buildSortedCharset(preset: AsciiCharsetPreset): List<Char> {
-        val chars = buildCharacterSet(preset)
+    private fun buildSortedCharset(): List<Char> {
+        val chars = (32..126).map { it.toChar() }
         val scratchBitmap = Bitmap.createBitmap(densityGridWidth, densityGridHeight, Bitmap.Config.ARGB_8888)
         val scratchCanvas = Canvas(scratchBitmap)
         val scratchPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

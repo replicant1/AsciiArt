@@ -189,10 +189,7 @@ class ExoPlayerFrameListener(
                 )
                 val asciiText = when (displayModeProvider()) {
                     AsciiDisplayMode.IMAGE -> ""
-                    AsciiDisplayMode.ASCII -> AsciiArt.toAsciiText(
-                        grayscaleBitmap = frameResult.grayscaleBitmap,
-                        preset = AsciiCharsetPreset.PRINTABLE
-                    )
+                    AsciiDisplayMode.ASCII -> AsciiArt.toAsciiText(frameResult.grayscaleBitmap)
                 }
                 withContext(Dispatchers.Main) {
                     lastDisplayedBitmap?.recycle()

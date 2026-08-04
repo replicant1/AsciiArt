@@ -4,7 +4,7 @@ Full read of the ~1,800 lines of Kotlin under `app/src/main`, plus the Gradle co
 manifest and tests.
 
 **10 of the 12 numbered items are fixed.** Defect 3 and inefficiency 9 remain, along with
-7 entries on the simplification list. One bug not in the original review — the inverted
+6 entries on the simplification list. One bug not in the original review — the inverted
 ASCII glyph density — was found while writing tests for item 6 and is recorded below.
 
 Numbering is preserved from the original review so items stay traceable across the fixes,
@@ -68,6 +68,20 @@ Code that was never executed or never read:
 - `onSurfaceColor` — orphaned by `268b241`; assigned every recomposition, never read.
 - The composition-time `textPaint.color` assignment — both draw paths set the colour
   themselves before any `drawText`, so it never survived to a draw.
+
+### `AsciiCharsetPreset` removed
+
+`EXTENDED` was never passed by any caller. It was left alone during the dead-code sweep
+because deleting just that constant leaves a single-valued enum and a parameter with one
+legal argument — worse than either extreme — so the whole abstraction went instead:
+the enum, `buildCharacterSet`'s `when`, and `toAsciiText`'s `preset` parameter.
+
+`buildSortedCharset` now builds printable ASCII directly, and the charset cache is a
+`by lazy` property rather than a `mutableMapOf` keyed by preset. That also retires a latent
+threading bug: `getOrPut` on a plain `LinkedHashMap` is not thread-safe, and both the camera
+analysis executor and the video IO dispatcher reach it. `by lazy` defaults to SYNCHRONIZED.
+
+Recoverable from history if an extended charset is ever wanted.
 
 ### Composable-local constants hoisted to file scope
 
@@ -200,7 +214,7 @@ loaded-but-paused video, or the tab merely being open, now costs nothing.
 
 ### 3. Bitmap recycled while still held in Compose state
 
-`ExoPlayerFrameCapture.kt:198-199`
+`ExoPlayerFrameCapture.kt:195-196`
 
 `lastDisplayedBitmap?.recycle()` destroys the previous frame's bitmap, which is still the
 value of `videoBitmap` state and may not have been drawn yet. It doesn't crash today only
@@ -215,7 +229,7 @@ the same reprieve came from `drawSourceImage` being `false` at every call site.)
 
 ### 9. `setPixels` → `getPixels` round trip
 
-`ImageProcessor.kt:201` → `AsciiArt.kt:51-52`
+`ImageProcessor.kt:201` → `AsciiArt.kt:53-54`
 
 On the video path, `processBitmap` writes `bitmapOutputPixels` into a fresh bitmap, then
 `toAsciiText` immediately reads that same data back out into a newly allocated
@@ -226,9 +240,6 @@ the ASCII mapper skips two copies and a per-frame allocation.
 
 ## ⬜ Open — dead code and simplification
 
-- **`AsciiCharsetPreset.EXTENDED`** (`AsciiArt.kt:18, 77-86`) — no caller ever passes it. Left in
-  place during the dead-code sweep because removing it leaves a single-valued enum and raises
-  whether the `preset` parameter should go entirely; that is a design call, not a no-brainer.
 - **`VideoFileTabContent`** (`AsciiPreviewScreen.kt:282`) — a pure pass-through to
   `ExoPlayerVideoFileTab`. Simplification rather than dead code, since it is executed.
 - **`VideoFilePlayer.kt:59, 68-75, 104-131`** — `exoPlayer` as `mutableStateOf` set from inside

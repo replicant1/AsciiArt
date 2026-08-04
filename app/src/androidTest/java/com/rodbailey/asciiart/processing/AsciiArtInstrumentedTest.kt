@@ -140,7 +140,7 @@ class AsciiArtInstrumentedTest {
         }
         bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
         val text = try {
-            AsciiArt.toAsciiText(bitmap, AsciiCharsetPreset.PRINTABLE)
+            AsciiArt.toAsciiText(bitmap)
         } finally {
             bitmap.recycle()
         }
@@ -196,7 +196,7 @@ class AsciiArtInstrumentedTest {
         val pixels = IntArray(256) { gray -> Color.rgb(gray, gray, gray) }
         bitmap.setPixels(pixels, 0, 256, 0, 0, 256, 1)
         val text = try {
-            AsciiArt.toAsciiText(bitmap, AsciiCharsetPreset.PRINTABLE)
+            AsciiArt.toAsciiText(bitmap)
         } finally {
             bitmap.recycle()
         }
@@ -213,7 +213,7 @@ class AsciiArtInstrumentedTest {
         val bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
         bitmap.setPixel(0, 0, Color.rgb(intensity, intensity, intensity))
         return try {
-            AsciiArt.toAsciiText(bitmap, AsciiCharsetPreset.PRINTABLE).single()
+            AsciiArt.toAsciiText(bitmap).single()
         } finally {
             bitmap.recycle()
         }
