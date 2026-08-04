@@ -4,11 +4,14 @@ Full read of the ~1,800 lines of Kotlin under `app/src/main`, plus the Gradle co
 manifest and tests.
 
 **10 of the 12 numbered items are fixed.** Defect 3 and inefficiency 9 remain, along with
-4 entries on the simplification list. One bug not in the original review — the inverted
-ASCII glyph density — was found while writing tests for item 6 and is recorded below.
+4 entries on the simplification list.
 
-Numbering is preserved from the original review so items stay traceable across the fixes,
-which is why the fixed list below is not in numeric order.
+Two findings arrived after the original review and sit outside its numbering, both now
+fixed: the inverted ASCII glyph density, found while writing tests for item 6; and item 13,
+the cost of `toAsciiText`'s per-pixel mapping, found while measuring item 9.
+
+Numbering is otherwise preserved from the original review so items stay traceable across
+the fixes, which is why the fixed list below is not in numeric order.
 
 | Status | Meaning |
 | --- | --- |
@@ -115,6 +118,54 @@ They are now `private const val` at file scope, alongside the comment explaining
 `textMetricsCache` slot layout and the empirically chosen 0.92 text-height fraction. The
 cache array's size comes from a `TEXT_METRICS_CACHE_SLOTS` constant rather than a bare `4`,
 so the slot indices and the allocation cannot drift apart.
+
+### 13. `toAsciiText`'s per-pixel mapping cost 4.4 ms per frame
+
+Not in the original review — found while measuring item 9, which turned out to be a small
+part of a much larger cost in the same function.
+
+Two things happened for every one of the 32,400 pixels in a frame: a float multiply,
+divide, `roundToInt` and `coerceIn` (plus re-reading `.size` and `.lastIndex` inside the
+loop) to recompute one of only 256 possible answers; and an interface dispatch plus an
+unbox on every charset access, because the sorted charset was a `List<Char>` — that is
+`List<java.lang.Character>`.
+
+Intensity is a byte, so the whole mapping is a 256-entry table. `glyphForIntensity` is now
+a `CharArray(256)` built once alongside the sorted charset, and the loop body is a single
+array read.
+
+Isolated on a Pixel 3 at the real grid size (135x240), median of 300 runs after warmup,
+all variants reading from the same `IntArray` so the item 9 round trip is excluded:
+
+| Variant | Time |
+| --- | --- |
+| A — as written: float arithmetic + `List<Char>` | 4.435 ms |
+| B — float arithmetic, `CharArray` | 2.468 ms |
+| C — index lookup table, `List<Char>` | 1.809 ms |
+| D — single glyph lookup table (`CharArray(256)`) | 1.019 ms |
+| E — floor: loop and `StringBuilder` only, no mapping | 0.992 ms |
+
+Removing the boxing alone (A→B) saved ~2.0 ms; removing the float arithmetic alone (A→C)
+saved ~2.6 ms. They overlap, so both together (A→D) saved 3.4 ms, not 4.6. D landing within
+noise of E means the mapping is now effectively free and what remains is the loop and
+`StringBuilder` themselves.
+
+End to end, timing the real `toAsciiText` against a replica of the previous implementation
+in the same run, on the same bitmap:
+
+| | Time |
+| --- | --- |
+| Before | 6.085 ms |
+| After | 1.368 ms |
+
+**4.7 ms saved per frame, a 78% reduction** — about 14% of a 30fps frame budget, on every
+ASCII frame on both tabs. The harness asserted the two implementations produce
+byte-identical output before timing anything, and the instrumented tests independently
+confirm it: they recover the charset *through* `toAsciiText` and assert glyph ordering,
+both polarity endpoints and ink monotonicity across the ramp.
+
+This changes the balance of item 9. The `getPixels` round trip measured 0.32 ms, which was
+~5% of `toAsciiText` before and is now ~23% of it.
 
 ### 2. Video tab ignored the pipeline entirely in Image mode
 
@@ -248,9 +299,10 @@ the same reprieve came from `drawSourceImage` being `false` at every call site.)
 
 ## ⬜ Open — inefficiencies
 
+
 ### 9. `setPixels` → `getPixels` round trip
 
-`ImageProcessor.kt:201` → `AsciiArt.kt:53-54`
+`ImageProcessor.kt:201` → `AsciiArt.kt:60-61`
 
 On the video path, `processBitmap` writes `bitmapOutputPixels` into a fresh bitmap, then
 `toAsciiText` immediately reads that same data back out into a newly allocated
