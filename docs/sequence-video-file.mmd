@@ -1,23 +1,23 @@
 sequenceDiagram
     participant UI as ExoPlayerVideoFileTab
     participant EFL as ExoPlayerFrameListener
-    participant EMR as MediaMetadataRetriever
+    participant TV as TextureView (hidden)
     participant IP as ImageProcessor
     participant AA as AsciiArt
-    
+
     UI->>EFL: Create listener with provider lambdas
-    EFL->>EFL: Start polling at ~60Hz (frameUpdateChecker)
-    loop Every 16ms
-        EFL->>EFL: Check exoPlayer.currentPosition()
-        alt Time advanced >= 30ms
-            EFL->>EFL: Offer frame time to queue
-            EFL->>EMR: getFrameAtTime(timeMs)
-            EMR-->>EFL: Bitmap at timeMs
-            EFL->>IP: processBitmap(bitmap, scaleFactor, contrastFactor)
-            IP-->>EFL: FrameProcessingResult (grayscale, colors)
+    UI->>EFL: startListening()
+    loop While playback is running
+        EFL->>EFL: Poll currentPosition every ~16ms
+        EFL->>TV: getBitmap(pooledBitmap) at size / scaleFactor
+        TV-->>EFL: Bitmap (reused from pool)
+        EFL->>IP: processBitmap(bitmap, contrastFactor, colorEnabled)
+        IP-->>EFL: FrameProcessingResult (grayscale, colors)
+        alt ASCII Mode
             EFL->>AA: toAsciiText(grayscaleBitmap)
             AA-->>EFL: ASCII text
-            EFL->>UI: onFrameProcessed(displayBitmap, asciiText, colors)
-            UI->>UI: Render to AsciiGridPreview
         end
+        EFL->>UI: onFrameProcessed(bitmap, asciiText, colors)
+        UI->>UI: Render via ImagePreview or AsciiGridPreview
     end
+    Note over EFL: When playback stops the loop suspends<br/>until Player.Listener signals isPlaying

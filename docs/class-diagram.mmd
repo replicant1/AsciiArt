@@ -1,27 +1,20 @@
 classDiagram
     class MainActivity {
         onCreate()
-        setContent()
     }
-    
+
     class AsciiPreviewScreen {
-        scaleFactor
-        contrastFactor
-        colorEnabled
-        displayMode
-        liveBitmap
-        liveAsciiText
-        liveAsciiColors
-        selectedTab
-    }
-    
-    class CameraAnalysisPipeline {
         scaleFactor: Int
         contrastFactor: Float
         colorEnabled: Boolean
         displayMode: AsciiDisplayMode
+        selectedTab: Int
     }
-    
+
+    class CameraAnalysisPipeline {
+        onFrameProcessed()
+    }
+
     class CameraFrameAnalyzer {
         scaleFactorProvider()
         contrastFactorProvider()
@@ -30,59 +23,70 @@ classDiagram
         onFrameProcessed()
         analyze(image: ImageProxy)
     }
-    
+
     class ExoPlayerVideoFileTab {
         scaleFactor: Int
         contrastFactor: Float
         colorEnabled: Boolean
         displayMode: AsciiDisplayMode
     }
-    
+
     class ExoPlayerFrameListener {
-        scaleFactorProvider()
-        contrastFactorProvider()
-        colorEnabledProvider()
-        displayModeProvider()
-        onFrameProcessed()
         startListening()
         stopListening()
+        release()
+        -pollForFrames()
+        -captureFrameToQueue()
+        -processQueuedFrames()
     }
-    
-    class ExoPlayerFrameCapture {
-        -processFrameQueue()
-        -processFrame(bitmap, frameTimeMs)
+
+    class FrameQueueState {
+        detectPlaybackRestart(currentTimeMs)
+        shouldQueueFrame(currentTimeMs, skipRate)
+        recordQueuedFrame(frameTimeMs)
     }
-    
+
     class ImageProcessor {
         +processLumaFrame()$
         +processBitmap()$
         -yuvToArgb()$
     }
-    
+
+    class RotationMap {
+        base: Int
+        stepX: Int
+        stepY: Int
+        destWidth: Int
+        destHeight: Int
+    }
+
     class FrameProcessingResult {
         grayscaleBitmap: Bitmap
         asciiColors: IntArray
     }
-    
+
     class AsciiArt {
-        +toAsciiText()$
+        +toAsciiText(grayscaleBitmap)$
+        -glyphForIntensity: CharArray
+        -buildSortedCharset()$
     }
-    
+
     class AsciiDisplayMode {
         <<enum>>
-        IMAGE_ONLY
-        ASCII_ONLY
+        IMAGE
+        ASCII
     }
-    
+
     MainActivity --> AsciiPreviewScreen
     AsciiPreviewScreen --> CameraAnalysisPipeline
     AsciiPreviewScreen --> ExoPlayerVideoFileTab
+    AsciiPreviewScreen --> AsciiDisplayMode
     CameraAnalysisPipeline --> CameraFrameAnalyzer
     CameraFrameAnalyzer --> ImageProcessor
-    ExoPlayerVideoFileTab --> ExoPlayerFrameListener
-    ExoPlayerFrameListener --> ExoPlayerFrameCapture
-    ExoPlayerFrameCapture --> ImageProcessor
-    ImageProcessor --> FrameProcessingResult
     CameraFrameAnalyzer --> AsciiArt
-    ExoPlayerFrameCapture --> AsciiArt
-    AsciiPreviewScreen --> AsciiDisplayMode
+    ExoPlayerVideoFileTab --> ExoPlayerFrameListener
+    ExoPlayerFrameListener --> FrameQueueState
+    ExoPlayerFrameListener --> ImageProcessor
+    ExoPlayerFrameListener --> AsciiArt
+    ImageProcessor --> RotationMap
+    ImageProcessor --> FrameProcessingResult
