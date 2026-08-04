@@ -6,7 +6,6 @@ import android.os.Looper
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.rodbailey.asciiart.processing.AsciiArt
-import com.rodbailey.asciiart.processing.AsciiCharsetPreset
 import com.rodbailey.asciiart.processing.AsciiDisplayMode
 import com.rodbailey.asciiart.processing.ImageProcessor
 
@@ -44,10 +43,7 @@ class CameraFrameAnalyzer(
         val orientedBitmap = frameResult.grayscaleBitmap
         val asciiText = when (displayModeProvider()) {
             AsciiDisplayMode.IMAGE -> ""
-            AsciiDisplayMode.ASCII -> AsciiArt.toAsciiText(
-                grayscaleBitmap = orientedBitmap,
-                preset = AsciiCharsetPreset.PRINTABLE
-            )
+            AsciiDisplayMode.ASCII -> AsciiArt.toAsciiText(orientedBitmap)
         }
         mainThreadHandler.post {
             onFrameProcessed(orientedBitmap, asciiText, frameResult.asciiColors)

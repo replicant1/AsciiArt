@@ -61,6 +61,22 @@ import kotlin.math.roundToInt
 
 private const val TAG = "AsciiPreviewScreen"
 
+// Slots in AsciiGridPreview's textMetricsCache, which holds the last computed cell size and
+// the text metrics derived from it, so measureText() and textSize mutations are skipped on
+// frames where the cell size has not changed (i.e. every frame in steady state).
+private const val CACHE_CELL_WIDTH = 0
+private const val CACHE_CELL_HEIGHT = 1
+private const val CACHE_CHAR_WIDTH = 2
+private const val CACHE_BASELINE_OFFSET = 3
+private const val TEXT_METRICS_CACHE_SLOTS = 4
+
+// Text height as a fraction of cell height. Set to slightly less than 1.0 so that characters
+// with tall ascenders or deep descenders (e.g. '|', 'g', 'y') do not overflow into adjacent
+// cells. The value was determined empirically: at 1.0 some glyphs clip; at 0.90 the gap is
+// visually noticeable; 0.92 is the largest value that keeps all printable ASCII glyphs within
+// their cell bounds.
+private const val TEXT_SIZE_CELL_FRACTION = 0.92f
+
 @Composable
 fun AsciiPreviewScreen() {
     // Shared slider controls for both camera and video pipelines
@@ -110,7 +126,7 @@ fun AsciiPreviewScreen() {
             )
             Slider(
                 value = scaleFactor.toFloat(),
-                onValueChange = { scaleFactor = it.roundToInt().coerceIn(2, 48) },
+                onValueChange = { scaleFactor = it.roundToInt() },
                 valueRange = 2f..48f
             )
             Text(
@@ -119,7 +135,7 @@ fun AsciiPreviewScreen() {
             )
             Slider(
                 value = contrastFactor,
-                onValueChange = { contrastFactor = it.coerceIn(0.2f, 2.0f) },
+                onValueChange = { contrastFactor = it },
                 valueRange = 0.2f..2.0f
             )
             DisplayModeChipBar(
@@ -184,7 +200,7 @@ fun AsciiPreviewScreen() {
                 
                 1 -> {
                     // Video file tab
-                    VideoFileTabContent(
+                    ExoPlayerVideoFileTab(
                         scaleFactor = scaleFactor,
                         contrastFactor = contrastFactor,
                         colorEnabled = colorEnabled,
@@ -260,23 +276,6 @@ private fun CameraTabContent(
             }
         }
     }
-}
-
-@Composable
-private fun VideoFileTabContent(
-    scaleFactor: Int,
-    contrastFactor: Float,
-    colorEnabled: Boolean,
-    displayMode: AsciiDisplayMode,
-    modifier: Modifier = Modifier
-) {
-    ExoPlayerVideoFileTab(
-        scaleFactor = scaleFactor,
-        contrastFactor = contrastFactor,
-        colorEnabled = colorEnabled,
-        displayMode = displayMode,
-        modifier = modifier
-    )
 }
 
 @Composable
@@ -479,21 +478,9 @@ fun AsciiGridPreview(
     // that textPaint.fontMetrics produces. getFontMetrics(existing) fills it in-place.
     val fontMetricsCache = remember { AndroidPaint.FontMetrics() }
 
-    // Caches the last computed cell dimensions and their derived text metrics so that
-    // measureText() and textSize mutations are skipped on frames where the cell size
-    // is unchanged (i.e. every frame in steady state).
-    val textMetricsCache = remember { FloatArray(4) { -1f } }
-    val CACHE_CELL_WIDTH = 0
-    val CACHE_CELL_HEIGHT = 1
-    val CACHE_CHAR_WIDTH = 2
-    val CACHE_BASELINE_OFFSET = 3
-
-    // Text height as a fraction of cell height. Set to slightly less than 1.0 so that
-    // characters with tall ascenders or deep descenders (e.g. '|', 'g', 'y') do not
-    // overflow into adjacent cells. The value was determined empirically: at 1.0 some
-    // glyphs clip; at 0.90 the gap is visually noticeable; 0.92 is the largest value
-    // that keeps all printable ASCII glyphs within their cell bounds.
-    val TEXT_SIZE_CELL_FRACTION = 0.92f
+    // Slot layout and the -1f "not yet measured" sentinel are documented at the CACHE_*
+    // constants above.
+    val textMetricsCache = remember { FloatArray(TEXT_METRICS_CACHE_SLOTS) { -1f } }
 
     Canvas(
         modifier = modifier.background(Color.Black)
