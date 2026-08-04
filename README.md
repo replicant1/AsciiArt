@@ -101,19 +101,18 @@ sequenceDiagram
     participant UI as AsciiPreviewScreen
 
     Camera->>CFA: ImageProxy (YUV)
-    CFA->>IP: processLumaFrame(rotationDegrees)
+    CFA->>IP: processLumaFrame(displayMode, rotationDegrees)
     IP->>IP: Read Y plane, downsample
     IP->>IP: Apply contrast adjustment
     IP->>IP: Write each cell to its rotated index
-    IP->>IP: Create grayscale ARGB bitmap
-    IP-->>CFA: FrameProcessingResult (bitmap, null)
     alt ASCII Mode
-        CFA->>AA: toAsciiText(bitmap)
-        AA-->>CFA: ASCII text
+        IP->>AA: toAsciiText(lumaPixels, gridWidth, gridHeight)
+        AA-->>IP: ASCII text
     else Image Mode
-        CFA->>CFA: Skip ASCII conversion
+        IP->>IP: Create grayscale ARGB display bitmap
     end
-    CFA->>UI: onFrameProcessed(bitmap, asciiText, null)
+    IP-->>CFA: FrameProcessingResult (displayBitmap, asciiText, null, grid size)
+    CFA->>UI: onFrameProcessed(frame)
     UI->>UI: Render via ImagePreview or AsciiGridPreview
 ```
 
@@ -127,22 +126,21 @@ sequenceDiagram
     participant UI as AsciiPreviewScreen
 
     Camera->>CFA: ImageProxy (YUV)
-    CFA->>IP: processLumaFrame(colorEnabled=true, rotationDegrees)
+    CFA->>IP: processLumaFrame(colorEnabled=true, displayMode, rotationDegrees)
     IP->>IP: Read Y plane, downsample
     IP->>IP: Apply contrast adjustment
     IP->>IP: Sample U,V planes, convert YUV to ARGB per cell
-    IP->>IP: Write luma and colour to their rotated indices
-    IP->>IP: Create grayscale ARGB bitmap
-    IP-->>CFA: FrameProcessingResult (bitmap, colorGrid)
+    IP->>IP: Write colour to its rotated index (luma too, in ASCII mode)
     alt ASCII Mode
-        CFA->>AA: toAsciiText(bitmap)
-        AA-->>CFA: ASCII text
+        IP->>AA: toAsciiText(lumaPixels, gridWidth, gridHeight)
+        AA-->>IP: ASCII text
     else Image Mode
-        CFA->>CFA: Skip ASCII conversion
+        IP->>IP: Create display bitmap from the colour grid
     end
-    CFA->>UI: onFrameProcessed(bitmap, asciiText, colorGrid)
+    IP-->>CFA: FrameProcessingResult (displayBitmap, asciiText, colorGrid, grid size)
+    CFA->>UI: onFrameProcessed(frame)
     alt Image Mode
-        UI->>UI: ImagePreview builds one bitmap from colorGrid
+        UI->>UI: ImagePreview draws the colour bitmap
     else ASCII Mode
         UI->>UI: AsciiGridPreview tints each glyph from colorGrid
     end
@@ -163,16 +161,19 @@ sequenceDiagram
         EFL->>EFL: Poll currentPosition every ~16ms
         EFL->>TV: getBitmap(pooledBitmap) at size / scaleFactor
         TV-->>EFL: Bitmap (reused from pool)
-        EFL->>IP: processBitmap(bitmap, contrastFactor, colorEnabled)
-        IP-->>EFL: FrameProcessingResult (grayscale, colors)
+        EFL->>IP: processBitmap(bitmap, contrastFactor, colorEnabled, displayMode)
         alt ASCII Mode
-            EFL->>AA: toAsciiText(grayscaleBitmap)
-            AA-->>EFL: ASCII text
+            IP->>AA: toAsciiText(grayscalePixels, width, height)
+            AA-->>IP: ASCII text
+        else Image Mode
+            IP->>IP: Create display bitmap (colour grid or grayscale)
         end
-        EFL->>UI: onFrameProcessed(bitmap, asciiText, colors)
+        IP-->>EFL: FrameProcessingResult (displayBitmap, asciiText, colors, grid size)
+        EFL->>UI: onFrameProcessed(frame)
         UI->>UI: Render via ImagePreview or AsciiGridPreview
     end
     Note over EFL: When playback stops the loop suspends<br/>until Player.Listener signals isPlaying
+    UI->>EFL: refreshCurrentFrame() on a display mode change<br/>so a paused video re-renders in the new mode
 ```
 
 ### Shared Parameter Update Flow
@@ -231,6 +232,7 @@ classDiagram
         startListening()
         stopListening()
         release()
+        refreshCurrentFrame()
         -pollForFrames()
         -captureFrameToQueue()
         -processQueuedFrames()
@@ -257,12 +259,15 @@ classDiagram
     }
 
     class FrameProcessingResult {
-        grayscaleBitmap: Bitmap
-        asciiColors: IntArray
+        displayBitmap: Bitmap?
+        asciiText: String
+        asciiColors: IntArray?
+        gridWidth: Int
+        gridHeight: Int
     }
 
     class AsciiArt {
-        +toAsciiText(grayscaleBitmap)$
+        +toAsciiText(grayscalePixels, width, height)$
         -glyphForIntensity: CharArray
         -buildSortedCharset()$
     }
@@ -279,13 +284,12 @@ classDiagram
     AsciiPreviewScreen --> AsciiDisplayMode
     CameraAnalysisPipeline --> CameraFrameAnalyzer
     CameraFrameAnalyzer --> ImageProcessor
-    CameraFrameAnalyzer --> AsciiArt
     ExoPlayerVideoFileTab --> ExoPlayerFrameListener
     ExoPlayerFrameListener --> FrameQueueState
     ExoPlayerFrameListener --> ImageProcessor
-    ExoPlayerFrameListener --> AsciiArt
     ImageProcessor --> RotationMap
     ImageProcessor --> FrameProcessingResult
+    ImageProcessor --> AsciiArt
 ```
 
 | Class | Description |
@@ -293,12 +297,12 @@ classDiagram
 | `MainActivity` | The app's single Android `Activity`. Configures edge-to-edge / transparent system bar styling and hosts the root Compose content via `setContent`. |
 | `AsciiPreviewScreen` | Root composable screen. Owns all shared UI state — scale factor, contrast, colour toggle, display mode and selected tab — and renders the control panel plus the tab selector. |
 | `CameraAnalysisPipeline` | Private composable that wires up CameraX `ImageAnalysis`, binds it to the `LifecycleOwner`, and forwards each raw camera frame to a `CameraFrameAnalyzer` instance. |
-| `CameraFrameAnalyzer` | Implements `ImageAnalysis.Analyzer`. Receives raw YUV `ImageProxy` frames from CameraX, passes the sensor rotation through to `ImageProcessor` (which applies it while downsampling), optionally generates ASCII text, and posts results to the UI thread. |
-| `ImageProcessor` | Singleton. Downsamples luma data from a YUV `ImageProxy` or an existing `Bitmap`, applies contrast adjustment, and produces a grayscale `Bitmap` plus an optional per-cell ARGB colour array. Applies rotation inside the downsample loop via `RotationMap`. Keeps pre-allocated `IntArray` buffers for the data it consumes internally; the colour array is allocated per frame because it escapes to Compose state. |
+| `CameraFrameAnalyzer` | Implements `ImageAnalysis.Analyzer`. Receives raw YUV `ImageProxy` frames from CameraX, passes the sensor rotation and the current display mode through to `ImageProcessor` (which applies the rotation while downsampling), and posts the finished `FrameProcessingResult` to the UI thread. |
+| `ImageProcessor` | Singleton. Downsamples luma data from a YUV `ImageProxy` or an existing `Bitmap`, applies contrast adjustment, and produces exactly what the current display mode draws — see `FrameProcessingResult`. Applies rotation inside the downsample loop via `RotationMap`. Keeps pre-allocated `IntArray` buffers for the data it consumes internally; arrays that escape to Compose state are allocated per frame. |
 | `RotationMap` | A right-angle rotation expressed as an affine index map — `dstIndex = base + stepX * x + stepY * y` — so the downsample loop can write each cell directly to its rotated position. Pure arithmetic with no Android dependency, which is what makes it unit-testable. |
-| `FrameProcessingResult` | Immutable data class that carries the output of a single `ImageProcessor` call: a downsampled grayscale `Bitmap` and an optional `IntArray` of per-cell ARGB colours. |
-| `AsciiArt` | Singleton. Converts a grayscale bitmap to a multi-line ASCII `String` by mapping each pixel's intensity to a character from a density-sorted printable ASCII set — brighter cells map to denser glyphs. The mapping is precomputed into a `CharArray(256)` on first use, so the per-pixel cost is one array read. |
+| `FrameProcessingResult` | Immutable data class that carries the output of a single `ImageProcessor` call: the de-res grid dimensions, the ASCII text for ASCII mode, an optional `IntArray` of per-cell ARGB colours, and the `Bitmap` Image mode draws — null in ASCII mode, which draws no image. Building only what the mode shows is what keeps a full-size bitmap from being allocated and filled on every frame regardless of whether anything reads it. |
+| `AsciiArt` | Singleton. Converts a grid of grayscale pixels to a multi-line ASCII `String` by mapping each pixel's intensity to a character from a density-sorted printable ASCII set — brighter cells map to denser glyphs. The mapping is precomputed into a `CharArray(256)` on first use, so the per-pixel cost is one array read. |
 | `AsciiDisplayMode` | Enum with two values — `IMAGE` (render de-res bitmap cells) and `ASCII` (render character glyphs) — shared across both tabs. |
 | `ExoPlayerVideoFileTab` | Composable for the Video File tab. Creates and manages the `ExoPlayer` instance and its lifecycle. Provides a persistent control bar (Load, Restart, Play, Pause) visible in both modes. Delegates frame capture to `ExoPlayerFrameListener` and renders the output through `ImagePreview` or `AsciiGridPreview`. |
-| `ExoPlayerFrameListener` | Bridges ExoPlayer playback and the de-res pipeline. Polls the player position at ~60 Hz on the main thread while playback runs, captures rendered frames via `TextureView.getBitmap()` into a `Channel<Bitmap>`, and processes them on an IO thread via `ImageProcessor` and `AsciiArt`. Suspends its poll loop when playback stops. |
+| `ExoPlayerFrameListener` | Bridges ExoPlayer playback and the de-res pipeline. Polls the player position at ~60 Hz on the main thread while playback runs, captures rendered frames via `TextureView.getBitmap()` into a `Channel<Bitmap>`, and processes them on an IO thread via `ImageProcessor`. Suspends its poll loop when playback stops, and re-captures the displayed frame on demand so a paused video still follows a display mode change. |
 | `FrameQueueState` | Frame-timing state for the video pipeline, kept separate from the coroutine plumbing so it can be unit-tested: enforces a minimum gap between captures, applies the frame-skip rate, and detects backward seeks or loops. |

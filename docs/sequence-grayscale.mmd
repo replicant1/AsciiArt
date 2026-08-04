@@ -6,17 +6,16 @@ sequenceDiagram
     participant UI as AsciiPreviewScreen
 
     Camera->>CFA: ImageProxy (YUV)
-    CFA->>IP: processLumaFrame(rotationDegrees)
+    CFA->>IP: processLumaFrame(displayMode, rotationDegrees)
     IP->>IP: Read Y plane, downsample
     IP->>IP: Apply contrast adjustment
     IP->>IP: Write each cell to its rotated index
-    IP->>IP: Create grayscale ARGB bitmap
-    IP-->>CFA: FrameProcessingResult (bitmap, null)
     alt ASCII Mode
-        CFA->>AA: toAsciiText(bitmap)
-        AA-->>CFA: ASCII text
+        IP->>AA: toAsciiText(lumaPixels, gridWidth, gridHeight)
+        AA-->>IP: ASCII text
     else Image Mode
-        CFA->>CFA: Skip ASCII conversion
+        IP->>IP: Create grayscale ARGB display bitmap
     end
-    CFA->>UI: onFrameProcessed(bitmap, asciiText, null)
+    IP-->>CFA: FrameProcessingResult (displayBitmap, asciiText, null, grid size)
+    CFA->>UI: onFrameProcessed(frame)
     UI->>UI: Render via ImagePreview or AsciiGridPreview

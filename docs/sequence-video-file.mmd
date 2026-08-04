@@ -11,13 +11,16 @@ sequenceDiagram
         EFL->>EFL: Poll currentPosition every ~16ms
         EFL->>TV: getBitmap(pooledBitmap) at size / scaleFactor
         TV-->>EFL: Bitmap (reused from pool)
-        EFL->>IP: processBitmap(bitmap, contrastFactor, colorEnabled)
-        IP-->>EFL: FrameProcessingResult (grayscale, colors)
+        EFL->>IP: processBitmap(bitmap, contrastFactor, colorEnabled, displayMode)
         alt ASCII Mode
-            EFL->>AA: toAsciiText(grayscaleBitmap)
-            AA-->>EFL: ASCII text
+            IP->>AA: toAsciiText(grayscalePixels, width, height)
+            AA-->>IP: ASCII text
+        else Image Mode
+            IP->>IP: Create display bitmap (colour grid or grayscale)
         end
-        EFL->>UI: onFrameProcessed(bitmap, asciiText, colors)
+        IP-->>EFL: FrameProcessingResult (displayBitmap, asciiText, colors, grid size)
+        EFL->>UI: onFrameProcessed(frame)
         UI->>UI: Render via ImagePreview or AsciiGridPreview
     end
     Note over EFL: When playback stops the loop suspends<br/>until Player.Listener signals isPlaying
+    UI->>EFL: refreshCurrentFrame() on a display mode change<br/>so a paused video re-renders in the new mode

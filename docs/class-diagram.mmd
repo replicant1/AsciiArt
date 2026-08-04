@@ -35,6 +35,7 @@ classDiagram
         startListening()
         stopListening()
         release()
+        refreshCurrentFrame()
         -pollForFrames()
         -captureFrameToQueue()
         -processQueuedFrames()
@@ -61,12 +62,15 @@ classDiagram
     }
 
     class FrameProcessingResult {
-        grayscaleBitmap: Bitmap
-        asciiColors: IntArray
+        displayBitmap: Bitmap?
+        asciiText: String
+        asciiColors: IntArray?
+        gridWidth: Int
+        gridHeight: Int
     }
 
     class AsciiArt {
-        +toAsciiText(grayscaleBitmap)$
+        +toAsciiText(grayscalePixels, width, height)$
         -glyphForIntensity: CharArray
         -buildSortedCharset()$
     }
@@ -83,10 +87,9 @@ classDiagram
     AsciiPreviewScreen --> AsciiDisplayMode
     CameraAnalysisPipeline --> CameraFrameAnalyzer
     CameraFrameAnalyzer --> ImageProcessor
-    CameraFrameAnalyzer --> AsciiArt
     ExoPlayerVideoFileTab --> ExoPlayerFrameListener
     ExoPlayerFrameListener --> FrameQueueState
     ExoPlayerFrameListener --> ImageProcessor
-    ExoPlayerFrameListener --> AsciiArt
     ImageProcessor --> RotationMap
     ImageProcessor --> FrameProcessingResult
+    ImageProcessor --> AsciiArt

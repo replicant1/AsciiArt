@@ -6,22 +6,21 @@ sequenceDiagram
     participant UI as AsciiPreviewScreen
 
     Camera->>CFA: ImageProxy (YUV)
-    CFA->>IP: processLumaFrame(colorEnabled=true, rotationDegrees)
+    CFA->>IP: processLumaFrame(colorEnabled=true, displayMode, rotationDegrees)
     IP->>IP: Read Y plane, downsample
     IP->>IP: Apply contrast adjustment
     IP->>IP: Sample U,V planes, convert YUV to ARGB per cell
-    IP->>IP: Write luma and colour to their rotated indices
-    IP->>IP: Create grayscale ARGB bitmap
-    IP-->>CFA: FrameProcessingResult (bitmap, colorGrid)
+    IP->>IP: Write colour to its rotated index (luma too, in ASCII mode)
     alt ASCII Mode
-        CFA->>AA: toAsciiText(bitmap)
-        AA-->>CFA: ASCII text
+        IP->>AA: toAsciiText(lumaPixels, gridWidth, gridHeight)
+        AA-->>IP: ASCII text
     else Image Mode
-        CFA->>CFA: Skip ASCII conversion
+        IP->>IP: Create display bitmap from the colour grid
     end
-    CFA->>UI: onFrameProcessed(bitmap, asciiText, colorGrid)
+    IP-->>CFA: FrameProcessingResult (displayBitmap, asciiText, colorGrid, grid size)
+    CFA->>UI: onFrameProcessed(frame)
     alt Image Mode
-        UI->>UI: ImagePreview builds one bitmap from colorGrid
+        UI->>UI: ImagePreview draws the colour bitmap
     else ASCII Mode
         UI->>UI: AsciiGridPreview tints each glyph from colorGrid
     end
