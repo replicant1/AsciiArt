@@ -15,13 +15,20 @@ enum class AsciiDisplayMode {
 
 object AsciiArt {
     /**
-     * Printable ASCII sorted by visual density, built once on first use.
+     * Glyph for every possible grayscale intensity, built once on first use.
      *
-     * `by lazy` rather than a map keyed by charset: there is only one charset, and its
-     * default SYNCHRONIZED mode makes initialisation safe from either pipeline — the
-     * camera analysis executor and the video IO dispatcher both reach this.
+     * Intensity is a byte, so the whole mapping is only 256 answers — no reason to
+     * recompute one per pixel. Doing so cost 4.4 ms per frame at a 135x240 grid on a
+     * Pixel 3: a float multiply, divide, [roundToInt] and [coerceIn] per pixel, plus an
+     * interface dispatch and an unbox on every access, because the sorted charset is a
+     * `List<Char>` — that is `List<java.lang.Character>`. Reading a `CharArray` here
+     * instead brings the mapping down to the cost of the loop itself, ~1.0 ms.
+     *
+     * `by lazy` because its default SYNCHRONIZED mode makes initialisation safe from
+     * either pipeline — the camera analysis executor and the video IO dispatcher both
+     * reach this.
      */
-    private val densitySortedChars: List<Char> by lazy { buildSortedCharset() }
+    private val glyphForIntensity: CharArray by lazy { buildGlyphTable() }
 
     private const val densityGridWidth = 24
     private const val densityGridHeight = 24
@@ -43,8 +50,8 @@ object AsciiArt {
      * @return A multi-line ASCII string with dimensions matching the input bitmap
      */
     fun toAsciiText(grayscaleBitmap: Bitmap): String {
-        val sortedChars = densitySortedChars
-        if (sortedChars.isEmpty()) {
+        val glyphs = glyphForIntensity
+        if (glyphs.isEmpty()) {
             return ""
         }
 
@@ -57,21 +64,34 @@ object AsciiArt {
         for (y in 0 until height) {
             val rowOffset = y * width
             for (x in 0 until width) {
-                val color = pixels[rowOffset + x]
-                val gray = color and 0xFF
-                // sortedChars ascends in density, so intensity maps straight to the index:
-                // bright pixels reach the dense end ('@', '#'), dark pixels stay near ' '.
-                // Do not invert to (255 - gray) — on the black background of ASCII mode that
-                // blanks out the bright parts of the scene and inks the dark ones.
-                val index = (gray * (sortedChars.size - 1) / 255f).roundToInt()
-                    .coerceIn(0, sortedChars.lastIndex)
-                textBuilder.append(sortedChars[index])
+                // The low byte is the grayscale intensity, which indexes the glyph table
+                // directly. See buildGlyphTable for the mapping and why it is precomputed.
+                textBuilder.append(glyphs[pixels[rowOffset + x] and 0xFF])
             }
             if (y < height - 1) {
                 textBuilder.append('\n')
             }
         }
         return textBuilder.toString()
+    }
+
+    /**
+     * Builds the intensity-to-glyph table from the density-sorted charset.
+     *
+     * The charset ascends in density, so intensity maps straight to an index: bright
+     * pixels reach the dense end ('@', '#'), dark pixels stay near ' '. Do not invert to
+     * `255 - gray` — on the black background of ASCII mode that blanks out the bright
+     * parts of the scene and inks the dark ones.
+     */
+    private fun buildGlyphTable(): CharArray {
+        val sortedChars = buildSortedCharset()
+        if (sortedChars.isEmpty()) {
+            return CharArray(0)
+        }
+        val lastIndex = sortedChars.size - 1
+        return CharArray(256) { gray ->
+            sortedChars[(gray * lastIndex / 255f).roundToInt().coerceIn(0, lastIndex)]
+        }
     }
 
     /**
