@@ -3,14 +3,14 @@
 Full read of the ~1,800 lines of Kotlin under `app/src/main`, plus the Gradle config,
 manifest and tests.
 
-**10 of the 12 numbered items are fixed.** Defect 3 and inefficiency 9 remain, along with
-3 entries on the simplification list.
+**10 of the 12 numbered items are fixed.** Defect 3 and inefficiencies 9 and 15 remain,
+along with 3 entries on the simplification list.
 
-Three findings arrived after the original review and sit outside its numbering: the
+Four findings arrived after the original review and sit outside its numbering: the
 inverted ASCII glyph density, found while writing tests for item 6; item 13, the cost of
-`toAsciiText`'s per-pixel mapping, found while measuring item 9; and item 14, contrast not
-reaching colour output, found by tracing what the grayscale bitmap is used for. All three
-are fixed.
+`toAsciiText`'s per-pixel mapping, found while measuring item 9; item 14, contrast not
+reaching colour output, found by tracing what the grayscale bitmap is used for; and item 15,
+split out of 14. Items 13 and 14 and the density bug are fixed; 15 is open.
 
 Numbering is otherwise preserved from the original review so items stay traceable across
 the fixes, which is why the fixed list below is not in numeric order.
@@ -165,9 +165,11 @@ Two things this fix does **not** address, both still open:
   pixels into `colorPixels` verbatim while applying contrast only to the grayscale output.
   Unverified — it needs a video file loaded — and the fix would differ, since that path has
   RGB rather than YUV in hand.
-- In Colour + Image mode the entire grayscale bitmap is still computed and discarded:
-  per-pixel contrast arithmetic, a ~130 KB allocation and a `setPixels`, every frame, for a
-  result only two integers are read from.
+- In Colour + Image mode the grayscale bitmap is still built and discarded. Now item 15.
+
+Note that fixing this *narrowed* item 15: before, the per-pixel contrast arithmetic was
+surplus in Colour + Image mode too, because nothing downstream consumed it. It now feeds
+`yuvToArgb`, so only the bitmap itself is wasted.
 
 ### 13. `toAsciiText`'s per-pixel mapping cost 4.4 ms per frame
 
@@ -350,6 +352,36 @@ the same reprieve came from `drawSourceImage` being `false` at every call site.)
 
 ## ⬜ Open — inefficiencies
 
+### 15. The grayscale bitmap is built and discarded in Colour + Image mode
+
+`ImageProcessor.kt:155-162` (camera), `ImageProcessor.kt:205-207` (video)
+
+Split out of item 14, where it was noted in passing.
+
+With Colour on and the display in Image mode, nothing reads the grayscale bitmap's pixels.
+`ImagePreview` builds its own bitmap from `asciiColors` and takes only `width` and `height`
+off the grayscale one — two integers, from a full-size image rebuilt every frame.
+
+Per frame at a 135x240 grid the surplus work is:
+
+- packing and storing 32,400 ARGB ints into the luma output buffer;
+- a `Bitmap.createBitmap` of ~130 KB, roughly 3.9 MB/s of allocation at 30fps;
+- a `setPixels` copy of those 32,400 ints, measured at ~0.03 ms.
+
+Both pipelines have the shape — `processLumaFrame` for the camera, `processBitmap` for
+video.
+
+The contrast arithmetic is **not** surplus. Since item 14, `contrastAdjustedGray` feeds
+`yuvToArgb`, so it is needed for the colour output whatever the mode. Only the grayscale
+*bitmap* is.
+
+Nor does this apply to Colour + ASCII mode: there `toAsciiText` reads the bitmap's pixels to
+choose glyphs, so it is doing real work even though it is never displayed.
+
+Any fix has to answer where the dimensions then come from. `ImageProcessor` does not know
+the display mode — `CameraFrameAnalyzer` and `ExoPlayerFrameListener` do — so it would need
+a flag, and `FrameProcessingResult` would have to carry the grid size itself rather than let
+callers read it off a bitmap that no longer exists.
 
 ### 9. `setPixels` → `getPixels` round trip
 
