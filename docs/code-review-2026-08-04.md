@@ -3,14 +3,14 @@
 Full read of the ~1,800 lines of Kotlin under `app/src/main`, plus the Gradle config,
 manifest and tests.
 
-**11 of the 12 numbered items are fixed.** Inefficiencies 9 and 15 remain, along with
-3 entries on the simplification list. No defects are open.
+**All 12 numbered items are fixed**, and so are the four that arrived later. What remains
+is 3 entries on the simplification list and the test coverage gaps. No defects are open.
 
-Four findings arrived after the original review and sit outside its numbering: the
-inverted ASCII glyph density, found while writing tests for item 6; item 13, the cost of
-`toAsciiText`'s per-pixel mapping, found while measuring item 9; item 14, contrast not
-reaching colour output, found by tracing what the grayscale bitmap is used for; and item 15,
-split out of 14. Items 13 and 14 and the density bug are fixed; 15 is open.
+The four later findings sit outside the original numbering: the inverted ASCII glyph
+density, found while writing tests for item 6; item 13, the cost of `toAsciiText`'s
+per-pixel mapping, found while measuring item 9; item 14, contrast not reaching colour
+output, found by tracing what the grayscale bitmap is used for; and item 15, split out
+of 14.
 
 Numbering is otherwise preserved from the original review so items stay traceable across
 the fixes, which is why the fixed list below is not in numeric order.
@@ -43,6 +43,7 @@ The README documented the mechanism that *causes* the bug (`255 - intensity`) al
 the outcome that mechanism prevents; corrected in the same commit.
 
 ### 1. Image mode rendered a photographic negative — `aa5e9ee`
+
 
 The same commit inverted **both** branches of `ImagePreview` — a `-1x + 255` `ColorMatrix`
 on the grayscale `Image`, and `invertArgb()` on every cell of the colour grid — so Image
@@ -156,8 +157,8 @@ The capture pool is untouched and still recycled in `release()`. Those bitmaps h
 one owner at a time and are never handed to Compose, so ending their lifetime is ours to do.
 
 The cost is one ~130 KB bitmap per frame reaching the collector slightly later than before.
-Item 15 would remove most of those allocations outright, which is the better answer than
-recycling something that is still being read.
+Item 15 has since removed most of those allocations outright, which is the better answer
+than recycling something that is still being read.
 
 ### 14. Contrast was not applied to colour output
 
@@ -184,13 +185,16 @@ with grayscale mode as a positive control:
 | Colour, before | 81.77 → 81.76 (0%) |
 | Colour, after | 17.08 → 116.50 (+582%) |
 
-Two things this fix does **not** address, both still open:
+Two things this fix does **not** address:
 
-- The video pipeline looks like it has the same gap. `processBitmap` copies the source
-  pixels into `colorPixels` verbatim while applying contrast only to the grayscale output.
-  Unverified — it needs a video file loaded — and the fix would differ, since that path has
-  RGB rather than YUV in hand.
-- In Colour + Image mode the grayscale bitmap is still built and discarded. Now item 15.
+- The video pipeline has the same gap, now confirmed. `processBitmap` copies the source
+  pixels into `colorPixels` verbatim while applying contrast only to the grayscale output,
+  so with Colour on the slider changes nothing — checked on a loaded video, at 100% and
+  194%, and unchanged by item 15, which only made the gap explicit: that mode no longer
+  runs the contrast arithmetic at all. The fix would differ from this one, since that path
+  has RGB rather than YUV in hand.
+- In Colour + Image mode the grayscale bitmap was still built and discarded. That became
+  item 15, now fixed.
 
 Note that fixing this *narrowed* item 15: before, the per-pixel contrast arithmetic was
 surplus in Colour + Image mode too, because nothing downstream consumed it. It now feeds
@@ -359,47 +363,78 @@ loaded-but-paused video, or the tab merely being open, now costs nothing.
 
 ---
 
-## ⬜ Open — inefficiencies
+### 9. `setPixels` → `getPixels` round trip
 
-### 15. The grayscale bitmap is built and discarded in Colour + Image mode
+`processBitmap` wrote `bitmapOutputPixels` into a fresh bitmap and `toAsciiText` immediately
+read that same data back out into a newly allocated `IntArray(width * height)`. The camera
+path did the same thing one call later.
 
-`ImageProcessor.kt:155-162` (camera), `ImageProcessor.kt:205-207` (video)
+`toAsciiText` now takes the pixels and the grid dimensions directly, so both copies and the
+per-frame allocation are gone. The conversion also moved inside `ImageProcessor`: the pixels
+it reads live in a buffer the next frame reuses, and calling it there is what keeps that
+buffer from crossing to the main thread. `CameraFrameAnalyzer` and `ExoPlayerFrameListener`
+each lost their `when (displayMode)` block as a result — the analyzer is now three
+statements.
 
-Split out of item 14, where it was noted in passing.
+This is also what makes item 15 possible: with nothing reading the bitmap's pixels, ASCII
+mode has no use for a bitmap at all.
 
-With Colour on and the display in Image mode, nothing reads the grayscale bitmap's pixels.
-`ImagePreview` builds its own bitmap from `asciiColors` and takes only `width` and `height`
-off the grayscale one — two integers, from a full-size image rebuilt every frame.
+### 15. The grayscale bitmap was built and discarded in Colour + Image mode
 
-Per frame at a 135x240 grid the surplus work is:
+Fixed along the lines the design exploration below described, with item 9 landing first as
+it required.
 
-- packing and storing 32,400 ARGB ints into the luma output buffer;
-- a `Bitmap.createBitmap` of ~130 KB, roughly 3.9 MB/s of allocation at 30fps;
-- a `setPixels` copy of those 32,400 ints, measured at ~0.03 ms.
+`FrameProcessingResult` now carries a nullable `displayBitmap`, the ASCII text, the colour
+grid and the grid dimensions. `ImageProcessor` picks the picture once — colour grid or
+grayscale — instead of the UI re-deriving it, so each combination builds only what it draws.
+The UI signatures followed: `ImagePreview(bitmap, modifier)` lost its
+`colorEnabled`/`asciiColors` branch, and `AsciiGridPreview(gridWidth, gridHeight, …)` lost a
+`Bitmap` parameter whose pixels it never read.
 
-Both pipelines have the shape — `processLumaFrame` for the camera, `processBitmap` for
-video.
+Full-size allocations per frame at a 135x240 grid, ~130 KB each:
 
-Two things are **not** part of this item:
+| Display | Colour | Before | After |
+| --- | --- | --- | --- |
+| Image | off | 1 bitmap | 1 bitmap (already optimal) |
+| Image | on | 2 bitmaps + 1 array | 1 bitmap |
+| ASCII | off | 1 bitmap + 1 array | none |
+| ASCII | on | 1 bitmap + 2 arrays | 1 array |
 
-- **The contrast arithmetic is still needed.** Since item 14, `contrastAdjustedGray` feeds
-  `yuvToArgb`, so it is required for the colour output in every mode. Only the grayscale
-  bitmap is surplus, not the arithmetic that would have filled it.
-- **Colour + ASCII mode is unaffected.** There `toAsciiText` reads the bitmap's pixels to
-  choose glyphs, so it is doing real work even though the bitmap is never displayed.
+Colour + Image beat the estimate: the colour grid no longer escapes to Compose there, so it
+comes from a reusable buffer on the camera path and directly from the input buffer on the
+video path. ASCII mode makes no pixel allocations at all — about 7.8 MB/s of GC pressure at
+30fps — plus the ~0.35 ms of `setPixels`/`getPixels` those lines cost. The ASCII `String`
+itself remains; that is a separate ~65 KB.
 
-#### What a fix would look like
+Two things beyond the bitmap:
 
-The bitmap is doing three unrelated jobs, which is why it looks wasteful — it is being used
-as a transport, not only as an image:
+- **The per-pixel work is skipped too, not just the allocation.** In Colour + Image nothing
+  reads the grayscale grid, so the camera path no longer packs and stores it and the video
+  path skips its conversion loop outright.
+- **A frame is now built for one Display x Colour combination**, so changing either needs a
+  new frame. The camera delivers one within ~33 ms. A paused video does not, so
+  `ExoPlayerFrameListener.refreshCurrentFrame()` re-captures what the TextureView still
+  holds and the video tab calls it when the mode or the colour toggle changes. That also
+  closes a pre-existing hole: switching a paused video from Image to ASCII used to show
+  nothing, because the retained frame had been processed with `asciiText` empty.
 
-1. **Carrying pixels** to `toAsciiText`, which immediately reads them back out with
-   `getPixels` — that is item 9.
-2. **Carrying grid dimensions** to the UI. `AsciiGridPreview` reads `.width`/`.height`
-   thirteen times and reads pixels zero times.
+Verified on an API 35 emulator across all eight combinations of tab, display mode and colour,
+plus mode and colour switches on a paused video. The 9 instrumented tests pass, moved to the
+new `toAsciiText` signature — and simplified by it, since three of the helpers no longer need
+a `Bitmap` at all.
+
+#### The design exploration this came from
+
+The bitmap was doing three unrelated jobs, which is why it looked wasteful — it was being
+used as a transport, not only as an image:
+
+1. **Carrying pixels** to `toAsciiText`, which immediately read them back out with
+   `getPixels` — that was item 9.
+2. **Carrying grid dimensions** to the UI. `AsciiGridPreview` read `.width`/`.height`
+   thirteen times and read pixels zero times.
 3. **Being the thing drawn** — Image mode with Colour off.
 
-Only job 3 needs a `Bitmap`. Remove jobs 1 and 2 and it is needed in exactly one of four
+Only job 3 needs a `Bitmap`. Removing jobs 1 and 2 leaves it needed in exactly one of four
 combinations, and in that one it is not waste at all:
 
 | Display | Colour | Bitmap needed | Why |
@@ -409,66 +444,24 @@ combinations, and in that one it is not waste at all:
 | ASCII | off | no | glyphs come from the pixel array; the UI needs only dimensions |
 | ASCII | on | no | same |
 
-Full-size allocations per frame at a 135x240 grid, ~130 KB each:
+Two things were **not** part of the item:
 
-| Display | Colour | Now | With the fix |
-| --- | --- | --- | --- |
-| Image | off | 1 bitmap | 1 bitmap (already optimal) |
-| Image | on | 2 bitmaps + 1 array | 1 bitmap + 1 array |
-| ASCII | off | 1 bitmap + 1 array | none |
-| ASCII | on | 1 bitmap + 2 arrays | 1 array |
-
-ASCII mode goes from ~260 KB per frame to no pixel allocations at all — about 7.8 MB/s of
-GC pressure at 30fps — plus the ~0.35 ms of `setPixels` and `getPixels` those lines cost.
-The ASCII `String` itself remains; that is a separate ~65 KB.
-
-The shape that gets there:
-
-```kotlin
-data class FrameProcessingResult(
-    val displayBitmap: Bitmap?,   // null unless Image mode
-    val asciiColors: IntArray?,
-    val gridWidth: Int,
-    val gridHeight: Int,
-)
-```
-
-`ImageProcessor` picks the source once — grayscale or colour — rather than the UI
-re-deriving it, which makes this a simplification as well as an efficiency:
-`ImagePreview(bitmap, modifier)` loses its `colorEnabled`/`asciiColors` branch entirely, and
-`AsciiGridPreview(gridWidth, gridHeight, …)` loses a `Bitmap` parameter whose pixels it never
-read, so its signature stops implying otherwise.
-
-It does not work as a single change. The dependencies run in order:
-
-1. **Item 3** — mandatory, since the fix makes the returned bitmap definitively the drawn
-   one. Now done.
-2. **Item 9** — `toAsciiText` takes pixels and dimensions. This is what frees ASCII mode from
-   needing a bitmap at all, and is where most of the benefit above comes from.
-3. **Item 15** — nullable display bitmap, explicit dimensions, UI signatures follow.
-
-Roughly six files, and the instrumented tests move to the new `toAsciiText` signature. The
-cheap alternative — skip the bitmap only in Colour + Image and leave everything else — is
-worth perhaps a fifth of the above, because it misses ASCII mode entirely.
-
-### 9. `setPixels` → `getPixels` round trip
-
-`ImageProcessor.kt:206` → `AsciiArt.kt:60-61`
-
-On the video path, `processBitmap` writes `bitmapOutputPixels` into a fresh bitmap, then
-`toAsciiText` immediately reads that same data back out into a newly allocated
-`IntArray(width*height)`. Passing the int array (or a grayscale `ByteArray`) directly to
-the ASCII mapper skips two copies and a per-frame allocation.
+- **The contrast arithmetic is still needed.** Since item 14, `contrastAdjustedGray` feeds
+  `yuvToArgb`, so it is required for the colour output in every mode. Only the grayscale
+  bitmap was surplus, not the arithmetic that would have filled it.
+- **Colour + ASCII mode was unaffected.** There `toAsciiText` reads the grayscale values to
+  choose glyphs, so that work was real even though the bitmap was never displayed.
 
 ---
 
 ## ⬜ Open — dead code and simplification
 
-- **`VideoFilePlayer.kt:63, 72-79, 108-135`** — `exoPlayer` as `mutableStateOf` set from inside
+- **`VideoFilePlayer.kt:63, 75-77, 106-129`** — `exoPlayer` as `mutableStateOf` set from inside
   `DisposableEffect` forces an extra recomposition round-trip that every downstream effect then
   has to null-guard; `remember { ExoPlayer.Builder(context).build() }` removes the nullability
-  and the guards. The three `rememberUpdatedState` setter wrappers are also unnecessary — a
-  lambda capturing a `MutableState` delegate stays valid across recomposition.
+  and the guards. The remaining `rememberUpdatedState` setter wrapper is also unnecessary — a
+  lambda capturing a `MutableState` delegate stays valid across recomposition. Item 15 folded
+  the other two into it, so this is one wrapper now rather than three.
 - **`READ_EXTERNAL_STORAGE` in the manifest** — the app uses SAF (`OpenDocument` +
   `takePersistableUriPermission`), which grants per-URI access. The permission is never requested
   at runtime and grants nothing on API 24+.
@@ -494,6 +487,9 @@ arithmetic put it under JVM unit test (`RotationMapTest`, 5 tests). Still uncove
   original `268b241` regression.
 - **`ImageProcessor.processLumaFrame` / `processBitmap`** — the loops themselves are untested;
   only the rotation mapping they now use is. Both need an `ImageProxy` or a real `Bitmap`.
+  Item 15 raised the stakes here: which of `displayBitmap`, `asciiText` and `asciiColors` a
+  frame carries now depends on the Display x Colour combination, and nothing asserts that
+  table. It was checked by hand across all eight tab/mode/colour combinations instead.
 - **`AsciiGridPreview`** — the draw loops are untested; item 7 pinned the contract they rely
   on, not the drawing.
 - **`ExampleUnitTest` / `ExampleInstrumentedTest`** — untouched template boilerplate.
