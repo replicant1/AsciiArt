@@ -1,7 +1,6 @@
 package com.rodbailey.asciiart.camera
 
 import android.graphics.Bitmap
-import android.graphics.Matrix
 import android.os.Handler
 import android.os.Looper
 import androidx.camera.core.ImageAnalysis
@@ -25,24 +24,24 @@ class CameraFrameAnalyzer(
 
     private val mainThreadHandler = Handler(Looper.getMainLooper())
 
+    /**
+     * Processes one camera frame into an oriented de-res grid and posts it to the UI.
+     *
+     * `imageInfo.rotationDegrees` is passed straight through to [ImageProcessor], which
+     * applies it while downsampling. Rotation is needed even though the app is locked to
+     * portrait, because camera sensors are physically mounted at a fixed angle — typically
+     * 90 degrees on phones like the Pixel 3 — so without it the output renders sideways.
+     */
     override fun analyze(image: ImageProxy) {
-        val rotationDegrees = image.imageInfo.rotationDegrees
-        val colorEnabled = colorEnabledProvider()
         val frameResult = ImageProcessor.processLumaFrame(
             image = image,
             scaleFactor = scaleFactorProvider(),
             contrastFactor = contrastFactorProvider(),
-            colorEnabled = colorEnabled
+            colorEnabled = colorEnabledProvider(),
+            rotationDegrees = image.imageInfo.rotationDegrees
         )
         image.close()
-        val bitmap = frameResult.grayscaleBitmap
-        val orientedBitmap = rotateBitmapIfNeeded(bitmap, rotationDegrees)
-        val orientedAsciiColors = rotateColorGridIfNeeded(
-            colors = frameResult.asciiColors,
-            width = bitmap.width,
-            height = bitmap.height,
-            rotationDegrees = rotationDegrees
-        )
+        val orientedBitmap = frameResult.grayscaleBitmap
         val asciiText = when (displayModeProvider()) {
             AsciiDisplayMode.IMAGE -> ""
             AsciiDisplayMode.ASCII -> AsciiArt.toAsciiText(
@@ -51,97 +50,7 @@ class CameraFrameAnalyzer(
             )
         }
         mainThreadHandler.post {
-            onFrameProcessed(orientedBitmap, asciiText, orientedAsciiColors)
+            onFrameProcessed(orientedBitmap, asciiText, frameResult.asciiColors)
         }
     }
-
-    /**
-     * Rotates the camera frame bitmap to match device display orientation.
-     *
-     * Although the app is locked to portrait orientation, this rotation is necessary
-     * because camera sensors are physically mounted at fixed angles on the device
-     * (typically 90° on most Android phones like the Pixel 3). CameraX reports the
-     * required rotation via imageInfo.rotationDegrees, which represents the angle
-     * needed to align the sensor output with the device's display orientation.
-     *
-     * Without this rotation, the ASCII art would render sideways (rotated 90°)
-     * even though the app UI is locked to portrait.
-     *
-     * @param bitmap The camera frame bitmap to rotate
-     * @param rotationDegrees The rotation angle reported by CameraX (typically 0, 90, 180, or 270)
-     * @return The rotated bitmap, or the original if no rotation is needed (rotationDegrees = 0)
-     */
-    private fun rotateBitmapIfNeeded(bitmap: Bitmap, rotationDegrees: Int): Bitmap {
-        if (rotationDegrees == 0) {
-            return bitmap
-        }
-        val matrix = Matrix().apply {
-            postRotate(rotationDegrees.toFloat())
-        }
-        val rotatedBitmap = Bitmap.createBitmap(
-            bitmap,
-            0,
-            0,
-            bitmap.width,
-            bitmap.height,
-            matrix,
-            true
-        )
-        // Don't recycle bitmap here - it may still be rendered by Compose
-        // Let garbage collection handle cleanup
-        return rotatedBitmap
-    }
-
-    private fun rotateColorGridIfNeeded(
-        colors: IntArray?,
-        width: Int,
-        height: Int,
-        rotationDegrees: Int
-    ): IntArray? {
-        if (colors == null) return null
-        val normalized = ((rotationDegrees % 360) + 360) % 360
-        if (normalized == 0) return colors.copyOf()
-
-        val rotated = IntArray(colors.size)
-        when (normalized) {
-            90 -> {
-                val newWidth = height
-                for (y in 0 until height) {
-                    for (x in 0 until width) {
-                        val srcIndex = (y * width) + x
-                        val newX = height - 1 - y
-                        val newY = x
-                        val dstIndex = (newY * newWidth) + newX
-                        rotated[dstIndex] = colors[srcIndex]
-                    }
-                }
-            }
-            180 -> {
-                for (y in 0 until height) {
-                    for (x in 0 until width) {
-                        val srcIndex = (y * width) + x
-                        val newX = width - 1 - x
-                        val newY = height - 1 - y
-                        val dstIndex = (newY * width) + newX
-                        rotated[dstIndex] = colors[srcIndex]
-                    }
-                }
-            }
-            270 -> {
-                val newWidth = height
-                for (y in 0 until height) {
-                    for (x in 0 until width) {
-                        val srcIndex = (y * width) + x
-                        val newX = y
-                        val newY = width - 1 - x
-                        val dstIndex = (newY * newWidth) + newX
-                        rotated[dstIndex] = colors[srcIndex]
-                    }
-                }
-            }
-            else -> return colors
-        }
-        return rotated
-    }
-
 }

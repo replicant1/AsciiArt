@@ -11,13 +11,61 @@ data class FrameProcessingResult(
     val asciiColors: IntArray?
 )
 
+/**
+ * A right-angle rotation expressed as an affine map into the destination grid:
+ * `dstIndex = base + (stepX * x) + (stepY * y)`, where x and y index the *source* grid.
+ *
+ * This lets the downsample loop write each pixel straight to its rotated position, instead
+ * of building the grid upright and then rotating it in a second pass.
+ */
+internal data class RotationMap(
+    val base: Int,
+    val stepX: Int,
+    val stepY: Int,
+    val destWidth: Int,
+    val destHeight: Int
+)
+
+/**
+ * Builds the [RotationMap] for a [width] x [height] source grid rotated clockwise by
+ * [rotationDegrees].
+ *
+ * The mapping matches `Matrix.postRotate()`, which is what the camera frame bitmap was
+ * previously rotated with, so the grid lands in the same orientation as before.
+ *
+ * Rotations that are not a multiple of 90 fall back to identity. CameraX only ever reports
+ * 0, 90, 180 or 270 via `imageInfo.rotationDegrees`.
+ */
+internal fun rotationMap(width: Int, height: Int, rotationDegrees: Int): RotationMap =
+    when (((rotationDegrees % 360) + 360) % 360) {
+        // (x, y) -> (height - 1 - y, x) in a height x width grid
+        90 -> RotationMap(
+            base = height - 1, stepX = height, stepY = -1,
+            destWidth = height, destHeight = width
+        )
+        // (x, y) -> (width - 1 - x, height - 1 - y)
+        180 -> RotationMap(
+            base = (width * height) - 1, stepX = -1, stepY = -width,
+            destWidth = width, destHeight = height
+        )
+        // (x, y) -> (y, width - 1 - x) in a height x width grid
+        270 -> RotationMap(
+            base = (width - 1) * height, stepX = -height, stepY = 1,
+            destWidth = height, destHeight = width
+        )
+        else -> RotationMap(
+            base = 0, stepX = 1, stepY = width,
+            destWidth = width, destHeight = height
+        )
+    }
+
 object ImageProcessor {
 
-    // Pre-allocated buffers for processLumaFrame (camera pipeline, single background thread).
-    // outputPixels is consumed by setPixels() within each call; lumaColorPixels is safe because
-    // rotateColorGridIfNeeded() always copies into a fresh IntArray before the buffer is reused.
+    // Pre-allocated buffer for processLumaFrame (camera pipeline, single background thread).
+    // Consumed by setPixels() within each call, so reuse is safe. There is no equivalent
+    // buffer for the colour grid: that array escapes to Compose state, so it is allocated
+    // fresh per frame.
     private var lumaOutputPixels = IntArray(0)
-    private var lumaColorPixels = IntArray(0)
 
     // Pre-allocated buffers for processBitmap (video pipeline, IO coroutine).
     // Both are consumed (read/written) entirely within each call before the next call can start.
@@ -25,11 +73,27 @@ object ImageProcessor {
     private var bitmapInputPixels = IntArray(0)
     private var bitmapOutputPixels = IntArray(0)
 
+    /**
+     * Downsamples a camera frame into a de-res grid, applying [rotationDegrees] as it goes.
+     *
+     * The rotation is folded into this loop rather than applied afterwards. Camera sensors
+     * are mounted at a fixed angle — typically 90 degrees on phones like the Pixel 3 — so
+     * even with the app locked to portrait the sensor output has to be turned to match the
+     * display, and CameraX reports the required angle via `imageInfo.rotationDegrees`.
+     * Without it the output renders sideways.
+     *
+     * This used to be a second pass: build the grid upright, then rotate the bitmap with
+     * `Bitmap.createBitmap(src, matrix, true)` and the colour grid with a copy loop. Since
+     * every pixel is already being written individually, [rotationMap] just changes where
+     * each one lands, which removes a full-size bitmap allocation, a rotation blit and a
+     * copy pass per frame.
+     */
     fun processLumaFrame(
         image: ImageProxy,
         scaleFactor: Int,
         contrastFactor: Float,
-        colorEnabled: Boolean
+        colorEnabled: Boolean,
+        rotationDegrees: Int
     ): FrameProcessingResult {
         val step = scaleFactor.coerceAtLeast(1)
         val contrast = contrastFactor.coerceIn(0.2f, 2.0f)
@@ -45,48 +109,52 @@ object ImageProcessor {
 
         val size = outputWidth * outputHeight
         if (lumaOutputPixels.size < size) lumaOutputPixels = IntArray(size)
-        val colorPixels: IntArray? = if (colorEnabled) {
-            if (lumaColorPixels.size < size) lumaColorPixels = IntArray(size)
-            lumaColorPixels
-        } else null
+        // Sized exactly, not pooled: this escapes to Compose as asciiColors, so a reused
+        // buffer would be overwritten underneath the UI while it is still being drawn.
+        val colorPixels: IntArray? = if (colorEnabled) IntArray(size) else null
+
+        val rotation = rotationMap(outputWidth, outputHeight, rotationDegrees)
         val uPlane = image.planes[1]
         val vPlane = image.planes[2]
         val uBuffer = uPlane.buffer
         val vBuffer = vPlane.buffer
-        var outIndex = 0
 
         for (y in 0 until outputHeight) {
             val sourceY = min(sourceHeight - 1, y * step)
             val rowOffset = sourceY * rowStride
+            val rotatedRowBase = rotation.base + (rotation.stepY * y)
             for (x in 0 until outputWidth) {
                 val sourceX = min(sourceWidth - 1, x * step)
                 val lumaIndex = rowOffset + (sourceX * pixelStride)
                 val gray = lumaBuffer.get(lumaIndex).toInt() and 0xFF
                 val contrastedGray = (((gray - 128f) * contrast) + 128f).coerceIn(0f, 255f)
                 val adjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
+                val outIndex = rotatedRowBase + (rotation.stepX * x)
                 lumaOutputPixels[outIndex] = (0xFF shl 24) or
                     (adjustedGray shl 16) or
                     (adjustedGray shl 8) or
                     adjustedGray
 
                 if (colorEnabled) {
-                    val yValue = gray
                     val uvX = sourceX / 2
                     val uvY = sourceY / 2
                     val uIndex = (uvY * uPlane.rowStride) + (uvX * uPlane.pixelStride)
                     val vIndex = (uvY * vPlane.rowStride) + (uvX * vPlane.pixelStride)
                     val uValue = uBuffer.get(uIndex).toInt() and 0xFF
                     val vValue = vBuffer.get(vIndex).toInt() and 0xFF
-                    val color = yuvToArgb(yValue, uValue, vValue)
-                    colorPixels?.set(outIndex, color)
+                    colorPixels?.set(outIndex, yuvToArgb(gray, uValue, vValue))
                 }
-                outIndex++
             }
         }
 
-        val grayscaleBitmap = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888).apply {
-            setPixels(lumaOutputPixels, 0, outputWidth, 0, 0, outputWidth, outputHeight)
-        }
+        val grayscaleBitmap = Bitmap
+            .createBitmap(rotation.destWidth, rotation.destHeight, Bitmap.Config.ARGB_8888)
+            .apply {
+                setPixels(
+                    lumaOutputPixels, 0, rotation.destWidth,
+                    0, 0, rotation.destWidth, rotation.destHeight
+                )
+            }
         return FrameProcessingResult(
             grayscaleBitmap = grayscaleBitmap,
             asciiColors = colorPixels
