@@ -88,13 +88,23 @@ the old keys, if it arrived after that effect's last run, `setVideoTextureView` 
 fired and the ASCII view sat on "Waiting for video frames..." until the user toggled the
 mode. Keying on the TextureView makes the ordering irrelevant.
 
+### 12. 60Hz main-thread poll that never stopped
+
+The `while(true) { … delay(16) }` loop ran for the whole lifetime of the Video tab, even
+with no video loaded and the player paused.
+
+A `Player.Listener` now feeds a `MutableStateFlow<Boolean>`, and the loop opens each
+iteration with `isPlaying.first { it }`. While playing that is a StateFlow read returning
+immediately; when playback stops the loop suspends until the listener wakes it. A
+loaded-but-paused video, or the tab merely being open, now costs nothing.
+
 ---
 
 ## ⬜ Open — defects
 
 ### 3. Bitmap recycled while still held in Compose state
 
-`ExoPlayerFrameCapture.kt:169-170`
+`ExoPlayerFrameCapture.kt:198-199`
 
 `lastDisplayedBitmap?.recycle()` destroys the previous frame's bitmap, which is still the
 value of `videoBitmap` state and may not have been drawn yet. It doesn't crash today only
@@ -157,14 +167,6 @@ Every frame allocates a rotated `Bitmap` (discarding the just-built one, never r
 the comment at `:90` explicitly defers to GC) plus a rotated `IntArray`. Both disappear if
 `processLumaFrame` writes into rotated output indices during the downsample it is already
 doing.
-
-### 12. 60Hz main-thread poll that never stops
-
-`ExoPlayerFrameCapture.kt:91-105`
-
-The `while(true) { … delay(16) }` loop runs for the whole lifetime of the Video tab even
-with no video loaded and the player paused. Gating it on
-`Player.Listener.onIsPlayingChanged` would let it suspend.
 
 ---
 
