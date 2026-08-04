@@ -17,7 +17,11 @@ import java.util.concurrent.ConcurrentLinkedQueue
 private const val TAG = "ExoPlayerFrameListener"
 
 /**
- * Captures frames from ExoPlayer for ASCII processing.
+ * Captures frames from ExoPlayer and runs them through the de-res pipeline.
+ *
+ * Capture happens in both display modes — the video tab renders the processed grid in
+ * Image mode as well as ASCII mode, matching the camera tab — so the only mode-dependent
+ * work is the ASCII text conversion, which is skipped in Image mode.
  *
  * Uses coroutines with a producer-consumer pattern:
  * - Main thread: Polls ExoPlayer position at ~60Hz. When a new frame is due, calls
@@ -86,7 +90,7 @@ class ExoPlayerFrameListener(
      */
     private suspend fun pollForFrames() {
         while (true) {
-            if (exoPlayer.isPlaying && displayModeProvider() == AsciiDisplayMode.ASCII) {
+            if (exoPlayer.isPlaying) {
                 val currentTimeMs = exoPlayer.currentPosition
 
                 if (frameState.detectPlaybackRestart(currentTimeMs)) {
@@ -154,10 +158,13 @@ class ExoPlayerFrameListener(
                     contrastFactor = contrastFactorProvider(),
                     colorEnabled = colorEnabledProvider()
                 )
-                val asciiText = AsciiArt.toAsciiText(
-                    grayscaleBitmap = frameResult.grayscaleBitmap,
-                    preset = AsciiCharsetPreset.PRINTABLE
-                )
+                val asciiText = when (displayModeProvider()) {
+                    AsciiDisplayMode.IMAGE -> ""
+                    AsciiDisplayMode.ASCII -> AsciiArt.toAsciiText(
+                        grayscaleBitmap = frameResult.grayscaleBitmap,
+                        preset = AsciiCharsetPreset.PRINTABLE
+                    )
+                }
                 withContext(Dispatchers.Main) {
                     lastDisplayedBitmap?.recycle()
                     lastDisplayedBitmap = frameResult.grayscaleBitmap

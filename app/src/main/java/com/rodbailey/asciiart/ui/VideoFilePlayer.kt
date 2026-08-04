@@ -42,7 +42,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.Player
-import com.google.android.exoplayer2.ui.StyledPlayerView
 import com.rodbailey.asciiart.processing.AsciiDisplayMode
 import com.rodbailey.asciiart.processing.ExoPlayerFrameListener
 
@@ -150,18 +149,17 @@ fun ExoPlayerVideoFileTab(
         player.play()
     }
 
-    // Switch ExoPlayer's render target when display mode changes
-    LaunchedEffect(displayMode, exoPlayer) {
+    // Point ExoPlayer at the capture TextureView. Both display modes render from captured
+    // frames, so the target never changes with displayMode — but it does have to wait for
+    // the TextureView, which AndroidView creates after the first composition. Keying on
+    // captureTextureView makes that ordering irrelevant.
+    LaunchedEffect(exoPlayer, captureTextureView) {
         val player = exoPlayer ?: return@LaunchedEffect
-        when (displayMode) {
-            AsciiDisplayMode.ASCII -> captureTextureView?.let { player.setVideoTextureView(it) }
-            AsciiDisplayMode.IMAGE -> captureTextureView?.let { player.clearVideoTextureView(it) }
-        }
+        val textureView = captureTextureView ?: return@LaunchedEffect
+        player.setVideoTextureView(textureView)
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        val showAscii = displayMode != AsciiDisplayMode.IMAGE
-
         // Persistent control bar — visible in both IMAGE and ASCII modes
         Row(
             modifier = Modifier
@@ -201,7 +199,9 @@ fun ExoPlayerVideoFileTab(
                 .fillMaxWidth()
                 .weight(1f)
         ) {
-            // Hidden TextureView for frame capture in ASCII mode (alpha=0 keeps it invisible)
+            // Hidden capture surface — ExoPlayer renders the decoded video here in both
+            // display modes and getBitmap() reads it back. alpha=0 keeps it invisible;
+            // the processed output is drawn over the top.
             AndroidView(
                 factory = { ctx ->
                     TextureView(ctx).apply { alpha = 0f }.also { captureTextureView = it }
@@ -221,28 +221,25 @@ fun ExoPlayerVideoFileTab(
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
-            } else if (!showAscii) {
-                exoPlayer?.let { player ->
-                    AndroidView(
-                        factory = { ctx ->
-                            StyledPlayerView(ctx).apply {
-                                this.player = player
-                                useController = false
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
             } else {
                 val bitmap = videoBitmap
                 if (bitmap != null) {
-                    AsciiGridPreview(
-                        bitmap = bitmap,
-                        asciiText = asciiText,
-                        asciiColors = asciiColors,
-                        colorEnabled = colorEnabled,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    when (displayMode) {
+                        AsciiDisplayMode.IMAGE -> ImagePreview(
+                            bitmap = bitmap,
+                            colorEnabled = colorEnabled,
+                            asciiColors = asciiColors,
+                            modifier = Modifier.fillMaxSize()
+                        )
+
+                        AsciiDisplayMode.ASCII -> AsciiGridPreview(
+                            bitmap = bitmap,
+                            asciiText = asciiText,
+                            asciiColors = asciiColors,
+                            colorEnabled = colorEnabled,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 } else {
                     Box(
                         modifier = Modifier
