@@ -3,14 +3,21 @@
 Full read of the ~1,800 lines of Kotlin under `app/src/main`, plus the Gradle config,
 manifest and tests.
 
-Line references are pinned to the commit that removed the dead code listed below.
-Numbering is preserved from the original review so items stay traceable; items 1 and 6,
-and most of the dead-code list, have since been fixed.
+**10 of the 12 numbered items are fixed.** Defect 3 and inefficiency 9 remain, along with
+8 entries on the simplification list. One bug not in the original review — the inverted
+ASCII glyph density — was found while writing tests for item 6 and is recorded below.
+
+Numbering is preserved from the original review so items stay traceable across the fixes,
+which is why the fixed list below is not in numeric order.
 
 | Status | Meaning |
-|---|---|
-| ✅ Fixed | Landed on `main`, commit noted |
+| --- | --- |
+| ✅ Fixed | Fix is in the tree. A commit is cited where the item maps to a single commit; the later fixes were grouped, so most are not. |
 | ⬜ Open | Still present |
+
+Line references describe the current state of the tree, not the state at review time — the
+fixes have shifted them repeatedly. Every `File.kt:NNN` below is checked mechanically
+against the file it names, so a reference that has drifted is a bug in this document.
 
 ---
 
@@ -48,9 +55,9 @@ delegates to `sortedWith(compareBy(selector))`, and `compareBy` invokes its sele
 ~2n log n times instead of n. For the 95-character PRINTABLE set that is roughly 1,200
 measurements instead of 95.
 
-### Dead code in the render and frame-queue paths
+### Dead code in the render and frame-queue paths — `5bae97a`
 
-Removed in the same commit as this document:
+Code that was never executed or never read:
 
 - `FrameQueueState.shouldProcessFrame`, `recordProcessedFrame` and `lastProcessedTimeMs` —
   no production caller. Their six unit tests went too, taking `FrameQueueStateTest` from
@@ -111,10 +118,10 @@ performs the aspect-fit-and-centre the loop did by hand, and `FilterQuality.None
 keeps cells blocky rather than interpolated.
 
 This trades ~130 KB of short-lived allocation per frame for 32K canvas ops — a deliberate
-swap, and consistent with `ImageProcessor.processBitmap` and
-`CameraFrameAnalyzer.rotateBitmapIfNeeded`, which already allocate a bitmap per frame. A
-`remember`ed mutable bitmap would avoid the allocation but means mutating a bitmap Compose
-may still hold in a recorded display list — the hazard behind item 3.
+swap, and consistent with `ImageProcessor`, which already builds a bitmap per frame on both
+the camera and video paths. A `remember`ed mutable bitmap would avoid the allocation but
+means mutating a bitmap Compose may still hold in a recorded display list — the hazard
+behind item 3.
 
 It also removes one of the two copies of the letterbox math noted in the simplification
 list; `AsciiGridPreview` still has its own, because it needs the rect to place glyphs.
@@ -125,6 +132,45 @@ list; `AsciiGridPreview` still has its own, because it needs the rect to place g
 `copyOf(size)` before the loop, dropping a branch from the hot path. `copyOf(size)` also
 trims the reusable input buffer, which can be longer than the current frame needs; the
 previous `IntArray(size)` was already exactly sized, so the result is identical.
+
+### 11. Two full-bitmap rotations per camera frame
+
+Every frame built the grid upright, then rotated it twice as a second pass: a
+`Bitmap.createBitmap(src, matrix, true)` that discarded the just-built bitmap unrecycled,
+plus a full copy loop for the colour grid.
+
+Rotation is now folded into the downsample. Since every pixel is already written
+individually, `rotationMap()` only changes *where* each one lands — a right-angle rotation
+is affine in the source coordinates, `dstIndex = base + (stepX * x) + (stepY * y)`, so the
+whole thing reduces to three integers and both passes disappear.
+
+Measured on a Pixel 3 at the real grid size (135x240), median of 300 runs after warmup:
+
+| Path | Before | After | Saved |
+| --- | --- | --- | --- |
+| Grayscale | 0.767 ms | 0.410 ms | 0.358 ms (47%) |
+| Colour | 0.912 ms | 0.404 ms | 0.508 ms (56%) |
+
+That is the changed stage only, not end-to-end frame time. Against a 33 ms budget at 30fps
+it is roughly 1–1.5% of the frame; the more useful effect is dropping a ~130 KB bitmap
+allocation per frame, about 3.9 MB/s of GC pressure at 30fps. Note the colour path now
+costs essentially the same as grayscale — the separate colour rotation pass is gone.
+
+The strided writes this introduces cost less than the pass they replace, so the cache
+locality concern did not materialise at this grid size.
+
+`rotationMap` is pure arithmetic with no Android dependency, so unlike the code it replaced
+it is covered by JVM unit tests (`RotationMapTest`) which assert it against the previous
+implementation verbatim.
+
+### 4. Shared scratch buffer could escape to the UI
+
+Fixed as a consequence of item 11. `rotateColorGridIfNeeded`'s `else ->` branch returned
+the live `lumaColorPixels` singleton straight to Compose state, where the next frame would
+overwrite it mid-draw.
+
+The colour grid is now written directly into a per-frame `IntArray` sized exactly to the
+output, so the shared buffer no longer exists and neither does the function that leaked it.
 
 ### 12. 60Hz main-thread poll that never stopped
 
@@ -151,37 +197,18 @@ which stay legal on a recycled bitmap. Anything that starts actually drawing it 
 into an immediate `Canvas: trying to use a recycled bitmap`. (Before the dead-code sweep
 the same reprieve came from `drawSourceImage` being `false` at every call site.)
 
-### 4. Shared scratch buffer can escape to the UI
-
-`CameraFrameAnalyzer.kt:142`
-
-`ImageProcessor.kt:17-18` documents the invariant that `rotateColorGridIfNeeded` *always*
-copies before the buffer is reused. The `else ->` branch returns `colors` — the live
-`lumaColorPixels` singleton — straight to Compose state, where the next frame overwrites
-it mid-draw. Only reachable if `rotationDegrees` isn't a multiple of 90 (CameraX doesn't
-currently produce that), but it silently breaks the stated contract.
-
 ---
 
 ## ⬜ Open — inefficiencies
 
 ### 9. `setPixels` → `getPixels` round trip
 
-`ImageProcessor.kt:133` → `AsciiArt.kt:51-52`
+`ImageProcessor.kt:201` → `AsciiArt.kt:51-52`
 
 On the video path, `processBitmap` writes `bitmapOutputPixels` into a fresh bitmap, then
 `toAsciiText` immediately reads that same data back out into a newly allocated
 `IntArray(width*height)`. Passing the int array (or a grayscale `ByteArray`) directly to
 the ASCII mapper skips two copies and a per-frame allocation.
-
-### 11. Two full-bitmap rotations per camera frame
-
-`CameraFrameAnalyzer.kt:74-93, 95-145`
-
-Every frame allocates a rotated `Bitmap` (discarding the just-built one, never recycled —
-the comment at `:90` explicitly defers to GC) plus a rotated `IntArray`. Both disappear if
-`processLumaFrame` writes into rotated output indices during the downsample it is already
-doing.
 
 ---
 
@@ -208,23 +235,29 @@ doing.
 - **`READ_EXTERNAL_STORAGE` in the manifest** — the app uses SAF (`OpenDocument` +
   `takePersistableUriPermission`), which grants per-URI access. The permission is never requested
   at runtime and grants nothing on API 24+.
-- **ExoPlayer 2.19.1** is end-of-life; every usage warns as deprecated (`ExoPlayer`, `MediaItem`,
-  `Player`, `StyledPlayerView`). `androidx.media3` is the maintained successor.
+- **ExoPlayer 2.19.1** is end-of-life; every remaining usage warns as deprecated (`ExoPlayer`,
+  `MediaItem`, `Player`). `androidx.media3` is the maintained successor. The item 2 fix removed
+  the `StyledPlayerView` usage, so the migration surface is now `ExoPlayerFrameCapture` and
+  `VideoFilePlayer` only.
 
 ---
 
 ## ⬜ Open — test coverage
 
-`AsciiArt` gained instrumented coverage in PR #20 (`AsciiArtInstrumentedTest`, 7 tests):
-charset ordering and the intensity→glyph mapping. `FrameQueueStateTest` is down to 10 tests
-after the dead-code sweep, and now covers only code the app actually runs. Still uncovered:
+`AsciiArt` gained instrumented coverage in PR #20 (`AsciiArtInstrumentedTest`, 8 tests):
+charset ordering, the intensity→glyph mapping and the row stride. `FrameQueueStateTest` is
+down to 10 tests after the dead-code sweep and now covers only code the app actually runs.
+Camera frame rotation used to be untestable Android code; extracting `rotationMap` as pure
+arithmetic put it under JVM unit test (`RotationMapTest`, 5 tests). Still uncovered:
 
-- **`ImagePreview`** — no tests at all. The item 1 fix was confirmed by eye on device. A Compose
-  `captureToImage()` test asserting a white input pixel renders white would close the gap, and
-  would have caught the original `268b241` regression.
-- **`ImageProcessor`** — untested.
-- **`CameraFrameAnalyzer.rotateColorGridIfNeeded`** — pure logic, trivially unit-testable, and the
-  place an off-by-one would be hardest to spot by eye.
+- **`ImagePreview`** — no tests at all, despite now carrying both the item 1 and item 8 fixes,
+  neither of which was verified by anything but reading. A Compose `captureToImage()` test
+  asserting a white input pixel renders white would close the gap, and would have caught the
+  original `268b241` regression.
+- **`ImageProcessor.processLumaFrame` / `processBitmap`** — the loops themselves are untested;
+  only the rotation mapping they now use is. Both need an `ImageProxy` or a real `Bitmap`.
+- **`AsciiGridPreview`** — the draw loops are untested; item 7 pinned the contract they rely
+  on, not the drawing.
 - **`ExampleUnitTest` / `ExampleInstrumentedTest`** — untouched template boilerplate.
 
 ---
