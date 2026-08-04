@@ -474,26 +474,17 @@ fun AsciiGridPreview(
     colorEnabled: Boolean,
     modifier: Modifier,
 ) {
-    // Build an IntArray of row-start indices by scanning asciiText once for '\n'.
-    // Replaces asciiText.split('\n') which allocated the following per frame:
-    //   - 1 List<String> wrapper
-    //   - 240 String objects (one per row; count = bitmap.height = 1920/scaleFactor on Pixel 3)
-    //   - 240 backing char[] arrays (ART does not share buffers between split substrings)
-    //   Each row is ~135 chars (bitmap.width = 1080/scaleFactor), so each char[] is
-    //   ~286 bytes → total ~85 KB allocated per frame → ~2.5 MB/sec of GC pressure at 30fps.
-    // Now: one IntArray(241) ≈ 964 bytes. drawText(asciiText, rowStart, rowEnd, ...) reads
-    // directly from the original string's char[] with no copy and no new heap objects.
-    // rowOffsets[y] is the index in asciiText where row y begins.
-    val rowOffsets = remember(asciiText) {
-        val newlineCount = asciiText.count { it == '\n' }
-        val offsets = IntArray(newlineCount + 1)
-        offsets[0] = 0
-        var row = 1
-        for (i in asciiText.indices) {
-            if (asciiText[i] == '\n' && row <= newlineCount) offsets[row++] = i + 1
-        }
-        offsets
-    }
+    // AsciiArt.toAsciiText emits exactly bitmap.width characters per row, separated by
+    // '\n', so row y starts at y * (bitmap.width + 1). Row bounds are pure arithmetic —
+    // no newline scan and no offsets array, which previously cost an O(text) scan plus an
+    // IntArray allocation on every frame.
+    //
+    // Both draw loops below then use drawText(asciiText, start, end, ...), which indexes
+    // straight into the original string's char[]. The point of that is to avoid
+    // asciiText.split('\n'), which allocated a List plus one String and one backing char[]
+    // per row — on a Pixel 3 at scaleFactor 8 that is 240 rows of ~135 chars, roughly
+    // 85 KB per frame, or ~2.5 MB/sec of GC pressure at 30fps.
+    val rowStride = bitmap.width + 1
     val defaultAsciiColor = Color.White.toArgb()
     val gridWidthSampleChar = stringResource(R.string.grid_width_sample_char)
     val textPaint = remember {
@@ -586,9 +577,9 @@ fun AsciiGridPreview(
                 textPaint.color = defaultAsciiColor
                 textPaint.letterSpacing = (cellWidth - charWidth) / textPaint.textSize
                 for (y in 0 until bitmap.height) {
-                    val rowStart = rowOffsets.getOrNull(y) ?: continue
-                    val rowEnd = if (y + 1 < rowOffsets.size) rowOffsets[y + 1] - 1 else asciiText.length
-                    if (rowStart >= rowEnd) continue
+                    val rowStart = y * rowStride
+                    if (rowStart >= asciiText.length) break
+                    val rowEnd = minOf(rowStart + bitmap.width, asciiText.length)
                     val textY = drawOffsetY + (y * cellHeight) + baselineOffset
                     nativeCanvas.drawText(asciiText, rowStart, rowEnd, rowStartX, textY, textPaint)
                 }
@@ -598,8 +589,9 @@ fun AsciiGridPreview(
                 // Reuse a CharArray(1) to avoid 36K String allocations per frame.
                 val singleChar = CharArray(1)
                 for (y in 0 until bitmap.height) {
-                    val rowStart = rowOffsets.getOrNull(y) ?: continue
-                    val rowEnd = if (y + 1 < rowOffsets.size) rowOffsets[y + 1] - 1 else asciiText.length
+                    val rowStart = y * rowStride
+                    if (rowStart >= asciiText.length) break
+                    val rowEnd = minOf(rowStart + bitmap.width, asciiText.length)
                     val textY = drawOffsetY + (y * cellHeight) + baselineOffset
                     for (x in 0 until bitmap.width) {
                         val pixelIndex = (y * bitmap.width) + x

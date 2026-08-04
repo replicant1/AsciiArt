@@ -107,14 +107,17 @@ object ImageProcessor {
         if (bitmapOutputPixels.size < size) bitmapOutputPixels = IntArray(size)
         bitmap.getPixels(bitmapInputPixels, 0, width, 0, 0, width, height)
 
-        val colorPixels = if (colorEnabled) IntArray(size) else null
+        // The colour grid is just the source pixels verbatim, so copy it in one go rather
+        // than assigning element-by-element inside the loop below. copyOf(size) also trims
+        // the reusable input buffer, which may be longer than this frame needs.
+        val colorPixels = if (colorEnabled) bitmapInputPixels.copyOf(size) else null
 
         for (i in 0 until size) {
             val argb = bitmapInputPixels[i]
             val r = (argb shr 16) and 0xFF
             val g = (argb shr 8) and 0xFF
             val b = argb and 0xFF
-            
+
             // Convert RGB to grayscale (luminance)
             val gray = (0.299f * r + 0.587f * g + 0.114f * b).toInt()
             val contrastedGray = (((gray - 128f) * contrast) + 128f).coerceIn(0f, 255f)
@@ -124,10 +127,6 @@ object ImageProcessor {
                 (adjustedGray shl 16) or
                 (adjustedGray shl 8) or
                 adjustedGray
-
-            if (colorEnabled) {
-                colorPixels?.set(i, argb)
-            }
         }
 
         val grayscaleBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
