@@ -4,7 +4,7 @@ Full read of the ~1,800 lines of Kotlin under `app/src/main`, plus the Gradle co
 manifest and tests.
 
 **10 of the 12 numbered items are fixed.** Defect 3 and inefficiency 9 remain, along with
-6 entries on the simplification list. One bug not in the original review — the inverted
+4 entries on the simplification list. One bug not in the original review — the inverted
 ASCII glyph density — was found while writing tests for item 6 and is recorded below.
 
 Numbering is preserved from the original review so items stay traceable across the fixes,
@@ -82,6 +82,27 @@ threading bug: `getOrPut` on a plain `LinkedHashMap` is not thread-safe, and bot
 analysis executor and the video IO dispatcher reach it. `by lazy` defaults to SYNCHRONIZED.
 
 Recoverable from history if an extended charset is ever wanted.
+
+### `VideoFileTabContent` pass-through removed
+
+The composable took five parameters and forwarded all five to
+`ExoPlayerVideoFileTab` unchanged. The tab now calls `ExoPlayerVideoFileTab` directly.
+
+### Redundant slider clamps removed
+
+`onValueChange = { scaleFactor = it.roundToInt().coerceIn(2, 48) }` clamped to the bounds
+`valueRange = 2f..48f` already guarantees. The contrast slider had the identical redundancy
+against `0.2f..2.0f` — not named in the original review, but fixed alongside.
+
+`ImageProcessor` keeps its own `coerceIn` on both values. That one is not redundant: it
+guards a public entry point rather than restating a constraint the caller already enforces.
+
+**Correction to the original finding.** It also claimed the missing `steps` meant dragging
+"fires many `onValueChange` calls that resolve to the same `Int`", implying wasted
+recompositions. The lambda does run per drag event, but no recomposition follows:
+`SnapshotMutableIntStateImpl` compares before writing and skips the notification when the
+value is unchanged. Adding `steps` would also make the slider snap and draw 45 tick marks,
+so it was not worth doing for a cost that does not exist.
 
 ### Composable-local constants hoisted to file scope
 
@@ -240,16 +261,11 @@ the ASCII mapper skips two copies and a per-frame allocation.
 
 ## ⬜ Open — dead code and simplification
 
-- **`VideoFileTabContent`** (`AsciiPreviewScreen.kt:282`) — a pure pass-through to
-  `ExoPlayerVideoFileTab`. Simplification rather than dead code, since it is executed.
 - **`VideoFilePlayer.kt:59, 68-75, 104-131`** — `exoPlayer` as `mutableStateOf` set from inside
   `DisposableEffect` forces an extra recomposition round-trip that every downstream effect then
   has to null-guard; `remember { ExoPlayer.Builder(context).build() }` removes the nullability
   and the guards. The three `rememberUpdatedState` setter wrappers are also unnecessary — a
   lambda capturing a `MutableState` delegate stays valid across recomposition.
-- **`AsciiPreviewScreen.kt:129`** — `.coerceIn(2, 48)` is redundant against `valueRange = 2f..48f`.
-  The slider also has no `steps`, so dragging fires many `onValueChange` calls that resolve to the
-  same `Int`.
 - **Hardcoded UI strings** — "Live Camera", "Video File", "Load", "No video loaded…", "Waiting for
   video frames…", and the Play/Pause/Restart `contentDescription`s bypass `strings.xml`, which the
   rest of the screen uses consistently.

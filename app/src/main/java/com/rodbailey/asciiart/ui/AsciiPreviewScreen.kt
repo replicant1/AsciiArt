@@ -126,7 +126,7 @@ fun AsciiPreviewScreen() {
             )
             Slider(
                 value = scaleFactor.toFloat(),
-                onValueChange = { scaleFactor = it.roundToInt().coerceIn(2, 48) },
+                onValueChange = { scaleFactor = it.roundToInt() },
                 valueRange = 2f..48f
             )
             Text(
@@ -135,7 +135,7 @@ fun AsciiPreviewScreen() {
             )
             Slider(
                 value = contrastFactor,
-                onValueChange = { contrastFactor = it.coerceIn(0.2f, 2.0f) },
+                onValueChange = { contrastFactor = it },
                 valueRange = 0.2f..2.0f
             )
             DisplayModeChipBar(
@@ -200,7 +200,7 @@ fun AsciiPreviewScreen() {
                 
                 1 -> {
                     // Video file tab
-                    VideoFileTabContent(
+                    ExoPlayerVideoFileTab(
                         scaleFactor = scaleFactor,
                         contrastFactor = contrastFactor,
                         colorEnabled = colorEnabled,
@@ -276,23 +276,6 @@ private fun CameraTabContent(
             }
         }
     }
-}
-
-@Composable
-private fun VideoFileTabContent(
-    scaleFactor: Int,
-    contrastFactor: Float,
-    colorEnabled: Boolean,
-    displayMode: AsciiDisplayMode,
-    modifier: Modifier = Modifier
-) {
-    ExoPlayerVideoFileTab(
-        scaleFactor = scaleFactor,
-        contrastFactor = contrastFactor,
-        colorEnabled = colorEnabled,
-        displayMode = displayMode,
-        modifier = modifier
-    )
 }
 
 @Composable
