@@ -55,6 +55,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.rodbailey.asciiart.camera.CameraFrameAnalyzer
 import com.rodbailey.asciiart.processing.AsciiDisplayMode
+import com.rodbailey.asciiart.processing.FrameProcessingResult
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
@@ -221,55 +222,42 @@ private fun CameraTabContent(
     displayMode: AsciiDisplayMode,
     modifier: Modifier = Modifier
 ) {
-    var liveBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var liveAsciiText by remember { mutableStateOf("") }
-    var liveAsciiColors by remember { mutableStateOf<IntArray?>(null) }
-    
+    var liveFrame by remember { mutableStateOf<FrameProcessingResult?>(null) }
+
     Column(modifier = modifier.fillMaxSize()) {
         CameraAnalysisPipeline(
             scaleFactor = scaleFactor,
             contrastFactor = contrastFactor,
             colorEnabled = colorEnabled,
             displayMode = displayMode,
-            onFrameProcessed = { bitmap, asciiText, asciiColors ->
-                liveBitmap = bitmap
-                liveAsciiText = asciiText
-                liveAsciiColors = asciiColors
-            }
+            onFrameProcessed = { frame -> liveFrame = frame }
         )
 
-        val liveBitmapValue = liveBitmap
-        if (liveBitmapValue != null) {
-            when (displayMode) {
-                AsciiDisplayMode.IMAGE -> {
-                    ImagePreview(
-                        bitmap = liveBitmapValue,
-                        colorEnabled = colorEnabled,
-                        asciiColors = liveAsciiColors,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                    )
-                }
+        val frame = liveFrame
+        val previewModifier = Modifier
+            .fillMaxWidth()
+            .weight(1f)
+        // A frame carries only what the mode it was captured under draws, so displayBitmap
+        // is null for the frame or two still in flight after a switch to Image mode. The
+        // camera delivers ~30 a second, so the placeholder covers that gap.
+        val imageBitmap = frame?.displayBitmap?.takeIf { displayMode == AsciiDisplayMode.IMAGE }
+        when {
+            imageBitmap != null -> ImagePreview(
+                bitmap = imageBitmap,
+                modifier = previewModifier
+            )
 
-                AsciiDisplayMode.ASCII -> {
-                    AsciiGridPreview(
-                        bitmap = liveBitmapValue,
-                        asciiText = liveAsciiText,
-                        asciiColors = liveAsciiColors,
-                        colorEnabled = colorEnabled,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                    )
-                }
-            }
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            frame != null && displayMode == AsciiDisplayMode.ASCII -> AsciiGridPreview(
+                gridWidth = frame.gridWidth,
+                gridHeight = frame.gridHeight,
+                asciiText = frame.asciiText,
+                asciiColors = frame.asciiColors,
+                colorEnabled = colorEnabled,
+                modifier = previewModifier
+            )
+
+            else -> Box(
+                modifier = previewModifier.background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 Text(stringResource(R.string.ascii_preview_waiting_for_frames), style = MaterialTheme.typography.labelMedium)
@@ -334,7 +322,7 @@ private fun CameraAnalysisPipeline(
     contrastFactor: Float,
     colorEnabled: Boolean,
     displayMode: AsciiDisplayMode,
-    onFrameProcessed: (Bitmap, String, IntArray?) -> Unit
+    onFrameProcessed: (FrameProcessingResult) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -406,39 +394,29 @@ private fun CameraAnalysisPipeline(
 }
 
 /**
- * Renders the de-res grid as coloured cells (Colour on) or as the grayscale bitmap
- * (Colour off).
+ * Draws the de-res grid: one small image — 135x240 at scaleFactor 8 on a Pixel 3 — scaled
+ * up with no filtering, so cells stay hard-edged. Colour mode used to draw that by hand,
+ * one drawRect per cell: 32,400 canvas ops per frame, ~972,000/sec at 30fps.
  *
- * Both branches draw the scene as captured — no inversion. Only the letterbox
- * background is black, to match the surrounding UI. ASCII mode needs its glyph density
- * to track brightness because ink on a black background *is* the light, but Image mode
- * paints the luminance directly, so inverting it just yields a photographic negative.
+ * Which picture this is — the sampled cell colours or the grayscale luma — is settled by
+ * [com.rodbailey.asciiart.processing.ImageProcessor], which builds only the one the current
+ * mode shows. This composable used to take both and choose, which meant the pipeline had to
+ * produce both.
+ *
+ * The scene is drawn as captured — no inversion. Only the letterbox background is black, to
+ * match the surrounding UI. ASCII mode needs its glyph density to track brightness because
+ * ink on a black background *is* the light, but Image mode paints the luminance directly,
+ * so inverting it just yields a photographic negative.
  */
 @Composable
 fun ImagePreview(
     bitmap: Bitmap,
-    colorEnabled: Boolean = false,
-    asciiColors: IntArray? = null,
     modifier: Modifier = Modifier
 ) {
-    // Colour mode paints the sampled cell colours, grayscale mode the luma bitmap. Either
-    // way it is one small image — 135x240 at scaleFactor 8 on a Pixel 3 — scaled up with
-    // no filtering, so cells stay hard-edged. Colour mode used to draw that by hand, one
-    // drawRect per cell: 32,400 canvas ops per frame, ~972,000/sec at 30fps.
-    //
-    // asciiColors may be longer than width * height, because the camera path's shared
-    // buffer is only ever grown. createBitmap needs the array to be *at least* that large
-    // and ignores the tail, matching the old asciiColors[(y * width) + x] indexing.
-    val source = if (colorEnabled && asciiColors != null) {
-        Bitmap.createBitmap(asciiColors, bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
-    } else {
-        bitmap
-    }
-
     // ContentScale.Fit performs the same aspect-fit-and-centre the manual loop did, and
     // FilterQuality.None is what keeps the cells blocky rather than interpolated.
     Image(
-        bitmap = source.asImageBitmap(),
+        bitmap = bitmap.asImageBitmap(),
         contentDescription = stringResource(R.string.ascii_preview_image_content_description),
         modifier = modifier.background(Color.Black),
         contentScale = ContentScale.Fit,
@@ -446,16 +424,25 @@ fun ImagePreview(
     )
 }
 
+/**
+ * Draws [asciiText] as a [gridWidth] x [gridHeight] grid of glyphs.
+ *
+ * The dimensions arrive as two integers because that is all this ever wanted. It used to
+ * take the grayscale `Bitmap` and read `.width`/`.height` off it — never a pixel — which
+ * read as if the image were being drawn here and kept a full-size bitmap alive per frame
+ * to carry two numbers.
+ */
 @Composable
 fun AsciiGridPreview(
-    bitmap: Bitmap,
+    gridWidth: Int,
+    gridHeight: Int,
     asciiText: String,
     asciiColors: IntArray?,
     colorEnabled: Boolean,
     modifier: Modifier,
 ) {
-    // AsciiArt.toAsciiText emits exactly bitmap.width characters per row, separated by
-    // '\n', so row y starts at y * (bitmap.width + 1). Row bounds are pure arithmetic —
+    // AsciiArt.toAsciiText emits exactly gridWidth characters per row, separated by
+    // '\n', so row y starts at y * (gridWidth + 1). Row bounds are pure arithmetic —
     // no newline scan and no offsets array, which previously cost an O(text) scan plus an
     // IntArray allocation on every frame.
     //
@@ -464,7 +451,7 @@ fun AsciiGridPreview(
     // asciiText.split('\n'), which allocated a List plus one String and one backing char[]
     // per row — on a Pixel 3 at scaleFactor 8 that is 240 rows of ~135 chars, roughly
     // 85 KB per frame, or ~2.5 MB/sec of GC pressure at 30fps.
-    val rowStride = bitmap.width + 1
+    val rowStride = gridWidth + 1
     val defaultAsciiColor = Color.White.toArgb()
     val gridWidthSampleChar = stringResource(R.string.grid_width_sample_char)
     val textPaint = remember {
@@ -485,8 +472,8 @@ fun AsciiGridPreview(
     Canvas(
         modifier = modifier.background(Color.Black)
     ) {
-        val sourceWidth = bitmap.width.toFloat()
-        val sourceHeight = bitmap.height.toFloat()
+        val sourceWidth = gridWidth.toFloat()
+        val sourceHeight = gridHeight.toFloat()
         val sourceAspect = sourceWidth / sourceHeight
         val canvasAspect = size.width / size.height
 
@@ -508,8 +495,8 @@ fun AsciiGridPreview(
         }
 
         if (asciiText.isNotEmpty()) {
-            val cellWidth = drawWidth / bitmap.width
-            val cellHeight = drawHeight / bitmap.height
+            val cellWidth = drawWidth / gridWidth
+            val cellHeight = drawHeight / gridHeight
 
             // Recompute text metrics only when cell dimensions change.
             // In steady state (no scale/canvas change) this block is skipped entirely,
@@ -544,10 +531,10 @@ fun AsciiGridPreview(
                 // no row String objects needed.
                 textPaint.color = defaultAsciiColor
                 textPaint.letterSpacing = (cellWidth - charWidth) / textPaint.textSize
-                for (y in 0 until bitmap.height) {
+                for (y in 0 until gridHeight) {
                     val rowStart = y * rowStride
                     if (rowStart >= asciiText.length) break
-                    val rowEnd = minOf(rowStart + bitmap.width, asciiText.length)
+                    val rowEnd = minOf(rowStart + gridWidth, asciiText.length)
                     val textY = drawOffsetY + (y * cellHeight) + baselineOffset
                     nativeCanvas.drawText(asciiText, rowStart, rowEnd, rowStartX, textY, textPaint)
                 }
@@ -556,13 +543,13 @@ fun AsciiGridPreview(
                 // Colour mode: must draw per-character for individual colours.
                 // Reuse a CharArray(1) to avoid 36K String allocations per frame.
                 val singleChar = CharArray(1)
-                for (y in 0 until bitmap.height) {
+                for (y in 0 until gridHeight) {
                     val rowStart = y * rowStride
                     if (rowStart >= asciiText.length) break
-                    val rowEnd = minOf(rowStart + bitmap.width, asciiText.length)
+                    val rowEnd = minOf(rowStart + gridWidth, asciiText.length)
                     val textY = drawOffsetY + (y * cellHeight) + baselineOffset
-                    for (x in 0 until bitmap.width) {
-                        val pixelIndex = (y * bitmap.width) + x
+                    for (x in 0 until gridWidth) {
+                        val pixelIndex = (y * gridWidth) + x
                         textPaint.color = asciiColors?.getOrNull(pixelIndex) ?: defaultAsciiColor
                         singleChar[0] = if (rowStart + x < rowEnd) asciiText[rowStart + x] else ' '
                         val textX = rowStartX + (x * cellWidth)

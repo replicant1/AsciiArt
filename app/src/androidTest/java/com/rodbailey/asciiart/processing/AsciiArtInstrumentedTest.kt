@@ -133,17 +133,11 @@ class AsciiArtInstrumentedTest {
     fun toAsciiText_laysRowsOutAtAFixedStride() {
         val width = 7
         val height = 5
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val pixels = IntArray(width * height) { i ->
             val gray = (i * 255) / (width * height - 1)
             Color.rgb(gray, gray, gray)
         }
-        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
-        val text = try {
-            AsciiArt.toAsciiText(bitmap)
-        } finally {
-            bitmap.recycle()
-        }
+        val text = AsciiArt.toAsciiText(pixels, width, height)
 
         assertEquals(
             "text should be width*height glyphs plus height-1 separators",
@@ -192,14 +186,8 @@ class AsciiArtInstrumentedTest {
      * therefore reproduces the sorted charset exactly.
      */
     private fun recoverSortedCharset(): List<Char> {
-        val bitmap = Bitmap.createBitmap(256, 1, Bitmap.Config.ARGB_8888)
         val pixels = IntArray(256) { gray -> Color.rgb(gray, gray, gray) }
-        bitmap.setPixels(pixels, 0, 256, 0, 0, 256, 1)
-        val text = try {
-            AsciiArt.toAsciiText(bitmap)
-        } finally {
-            bitmap.recycle()
-        }
+        val text = AsciiArt.toAsciiText(pixels, width = 256, height = 1)
 
         val sorted = ArrayList<Char>()
         for (char in text) {
@@ -210,13 +198,8 @@ class AsciiArtInstrumentedTest {
 
     /** The glyph `toAsciiText` selects for a single pixel of the given grey [intensity]. */
     private fun asciiFor(intensity: Int): Char {
-        val bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
-        bitmap.setPixel(0, 0, Color.rgb(intensity, intensity, intensity))
-        return try {
-            AsciiArt.toAsciiText(bitmap).single()
-        } finally {
-            bitmap.recycle()
-        }
+        val pixel = intArrayOf(Color.rgb(intensity, intensity, intensity))
+        return AsciiArt.toAsciiText(pixel, width = 1, height = 1).single()
     }
 
     /**

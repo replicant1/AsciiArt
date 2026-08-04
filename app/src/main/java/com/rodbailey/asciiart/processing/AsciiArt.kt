@@ -35,9 +35,9 @@ object AsciiArt {
     private const val densityTextSizePx = 20f
 
     /**
-     * Converts a grayscale bitmap to ASCII text.
+     * Converts a grid of grayscale ARGB pixels to ASCII text.
      *
-     * For each pixel in the input bitmap:
+     * For each pixel in the grid:
      * 1. Reads the grayscale intensity (0–255)
      * 2. Maps intensity to a character from a density-sorted character set
      * 3. Builds a string where each character represents the intensity of its corresponding pixel
@@ -46,19 +46,24 @@ object AsciiArt {
      * and dense characters (e.g., #) represent bright areas, creating a visual ASCII representation
      * of the original grayscale image.
      *
-     * @param grayscaleBitmap The input grayscale bitmap (expected to be a small de-res grid, e.g., 32×18 pixels)
-     * @return A multi-line ASCII string with dimensions matching the input bitmap
+     * This used to take the grayscale `Bitmap` and immediately `getPixels` it back into a
+     * freshly allocated array — a full-size copy out of a buffer the caller had just copied
+     * in. Taking the pixels directly removes both copies, and with nothing else reading the
+     * bitmap, ASCII mode no longer needs one at all.
+     *
+     * @param grayscalePixels Row-major ARGB pixels of a small de-res grid, e.g. 32x18. May be
+     *   longer than `width * height` — the callers pass reusable buffers that are only ever
+     *   grown — in which case the tail is ignored.
+     * @param width Grid width in cells
+     * @param height Grid height in cells
+     * @return A multi-line ASCII string with [width] glyphs on each of [height] rows
      */
-    fun toAsciiText(grayscaleBitmap: Bitmap): String {
+    fun toAsciiText(grayscalePixels: IntArray, width: Int, height: Int): String {
         val glyphs = glyphForIntensity
         if (glyphs.isEmpty()) {
             return ""
         }
 
-        val width = grayscaleBitmap.width
-        val height = grayscaleBitmap.height
-        val pixels = IntArray(width * height)
-        grayscaleBitmap.getPixels(pixels, 0, width, 0, 0, width, height)
         val textBuilder = StringBuilder((width + 1) * height)
 
         for (y in 0 until height) {
@@ -66,7 +71,7 @@ object AsciiArt {
             for (x in 0 until width) {
                 // The low byte is the grayscale intensity, which indexes the glyph table
                 // directly. See buildGlyphTable for the mapping and why it is precomputed.
-                textBuilder.append(glyphs[pixels[rowOffset + x] and 0xFF])
+                textBuilder.append(glyphs[grayscalePixels[rowOffset + x] and 0xFF])
             }
             if (y < height - 1) {
                 textBuilder.append('\n')

@@ -23,8 +23,10 @@ private const val TAG = "ExoPlayerFrameListener"
  * Captures frames from ExoPlayer and runs them through the de-res pipeline.
  *
  * Capture happens in both display modes — the video tab renders the processed grid in
- * Image mode as well as ASCII mode, matching the camera tab — so the only mode-dependent
- * work is the ASCII text conversion, which is skipped in Image mode.
+ * Image mode as well as ASCII mode, matching the camera tab. What the mode decides is how
+ * much of the frame [ImageProcessor] goes on to build; see [FrameProcessingResult]. Because
+ * a frame is built for one mode, changing modes needs a fresh one — see
+ * [refreshCurrentFrame].
  *
  * Uses coroutines with a producer-consumer pattern:
  * - Main thread: While playback is running, polls ExoPlayer position at ~60Hz. When
@@ -48,11 +50,7 @@ class ExoPlayerFrameListener(
     private val colorEnabledProvider: () -> Boolean,
     private val displayModeProvider: () -> AsciiDisplayMode,
     private val frameSkipRate: Int = 2,
-    private val onFrameProcessed: (
-        bitmap: Bitmap,
-        asciiText: String,
-        asciiColors: IntArray?
-    ) -> Unit
+    private val onFrameProcessed: (frame: FrameProcessingResult) -> Unit
 ) {
 
     private val scope = CoroutineScope(Job() + Dispatchers.Main.immediate)
@@ -103,6 +101,21 @@ class ExoPlayerFrameListener(
             pooled.recycle()
             pooled = captureBitmapPool.poll()
         }
+    }
+
+    /**
+     * Re-captures the frame currently on the TextureView and runs it through the pipeline
+     * again. Call from the main thread — [TextureView.getBitmap] reads a live view.
+     *
+     * A processed frame carries only what its own display mode and colour setting look at,
+     * so the frame on screen when either changes has no picture for Image mode, no glyphs
+     * for ASCII mode, or the wrong one of grayscale and colour. During playback the next
+     * capture covers that within a frame or two, but a paused video produces no next
+     * capture. The TextureView still holds the last decoded frame while paused, so
+     * capturing it again is what refreshes the display.
+     */
+    fun refreshCurrentFrame() {
+        captureFrameToQueue(exoPlayer.currentPosition)
     }
 
     /**
@@ -184,19 +197,16 @@ class ExoPlayerFrameListener(
                 val frameResult = ImageProcessor.processBitmap(
                     bitmap = bitmap,
                     contrastFactor = contrastFactorProvider(),
-                    colorEnabled = colorEnabledProvider()
+                    colorEnabled = colorEnabledProvider(),
+                    displayMode = displayModeProvider()
                 )
-                val asciiText = when (displayModeProvider()) {
-                    AsciiDisplayMode.IMAGE -> ""
-                    AsciiDisplayMode.ASCII -> AsciiArt.toAsciiText(frameResult.grayscaleBitmap)
-                }
                 withContext(Dispatchers.Main) {
                     // The processed bitmap is handed to Compose, which may still hold it in
                     // a recorded display list after the next frame arrives — Image mode
                     // draws it directly. Recycling the previous one here was a use-after-free
                     // waiting to happen, so its lifetime is left to the garbage collector,
                     // as CameraFrameAnalyzer already does for the same reason.
-                    onFrameProcessed(frameResult.grayscaleBitmap, asciiText, frameResult.asciiColors)
+                    onFrameProcessed(frameResult)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing frame", e)

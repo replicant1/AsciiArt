@@ -1,7 +1,6 @@
 package com.rodbailey.asciiart.ui
 
 import android.content.Intent
-import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Log
@@ -48,6 +47,7 @@ import com.google.android.exoplayer2.Player
 import com.rodbailey.asciiart.R
 import com.rodbailey.asciiart.processing.AsciiDisplayMode
 import com.rodbailey.asciiart.processing.ExoPlayerFrameListener
+import com.rodbailey.asciiart.processing.FrameProcessingResult
 
 private const val TAG = "VideoFilePlayer"
 
@@ -65,18 +65,16 @@ fun ExoPlayerVideoFileTab(
     var captureTextureView by remember { mutableStateOf<TextureView?>(null) }
     var loadedVideoUri by remember { mutableStateOf<String?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
-    var videoBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var asciiText by remember { mutableStateOf("") }
-    var asciiColors by remember { mutableStateOf<IntArray?>(null) }
+    var videoFrame by remember { mutableStateOf<FrameProcessingResult?>(null) }
 
     val currentScaleFactor = rememberUpdatedState(scaleFactor)
     val currentContrastFactor = rememberUpdatedState(contrastFactor)
     val currentColorEnabled = rememberUpdatedState(colorEnabled)
     val currentDisplayMode = rememberUpdatedState(displayMode)
     val currentCaptureTextureView = rememberUpdatedState(captureTextureView)
-    val currentBitmapSetter = rememberUpdatedState { bitmap: Bitmap? -> videoBitmap = bitmap }
-    val currentTextSetter = rememberUpdatedState { text: String -> asciiText = text }
-    val currentColorsSetter = rememberUpdatedState { colors: IntArray? -> asciiColors = colors }
+    val currentFrameSetter = rememberUpdatedState { frame: FrameProcessingResult ->
+        videoFrame = frame
+    }
 
     // File picker — opens in the Documents directory
     val videoPickerLauncher = rememberLauncherForActivityResult(
@@ -117,11 +115,7 @@ fun ExoPlayerVideoFileTab(
             colorEnabledProvider = { currentColorEnabled.value },
             displayModeProvider = { currentDisplayMode.value },
             frameSkipRate = 2,
-            onFrameProcessed = { bitmap, ascii, colors ->
-                currentBitmapSetter.value(bitmap)
-                currentTextSetter.value(ascii)
-                currentColorsSetter.value(colors)
-            }
+            onFrameProcessed = { frame -> currentFrameSetter.value(frame) }
         )
         frameListener = listener
         listener.startListening()
@@ -161,6 +155,16 @@ fun ExoPlayerVideoFileTab(
         val player = exoPlayer ?: return@LaunchedEffect
         val textureView = captureTextureView ?: return@LaunchedEffect
         player.setVideoTextureView(textureView)
+    }
+
+    // Each processed frame is built for one display mode and one colour setting, so
+    // changing either needs a frame of its own. While playing, the next capture is a frame
+    // or two away and this changes nothing; while paused there is no next capture, and
+    // without this the display would stay as it was until playback resumed. The Contrast
+    // and Scale sliders are deliberately not keys here: they fire continuously while being
+    // dragged, and each capture is a GPU-to-CPU readback on the main thread.
+    LaunchedEffect(displayMode, colorEnabled, frameListener) {
+        frameListener?.refreshCurrentFrame()
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -240,24 +244,26 @@ fun ExoPlayerVideoFileTab(
                     )
                 }
             } else {
-                val bitmap = videoBitmap
-                if (bitmap != null) {
-                    when (displayMode) {
-                        AsciiDisplayMode.IMAGE -> ImagePreview(
-                            bitmap = bitmap,
-                            colorEnabled = colorEnabled,
-                            asciiColors = asciiColors,
-                            modifier = Modifier.fillMaxSize()
-                        )
-
-                        AsciiDisplayMode.ASCII -> AsciiGridPreview(
-                            bitmap = bitmap,
-                            asciiText = asciiText,
-                            asciiColors = asciiColors,
-                            colorEnabled = colorEnabled,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
+                val frame = videoFrame
+                // A frame carries only what the mode it was captured under draws, so
+                // displayBitmap is null until a frame captured in Image mode arrives. The
+                // LaunchedEffect above asks for one the moment the mode changes.
+                val imageBitmap =
+                    frame?.displayBitmap?.takeIf { displayMode == AsciiDisplayMode.IMAGE }
+                if (imageBitmap != null) {
+                    ImagePreview(
+                        bitmap = imageBitmap,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else if (frame != null && displayMode == AsciiDisplayMode.ASCII) {
+                    AsciiGridPreview(
+                        gridWidth = frame.gridWidth,
+                        gridHeight = frame.gridHeight,
+                        asciiText = frame.asciiText,
+                        asciiColors = frame.asciiColors,
+                        colorEnabled = colorEnabled,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 } else {
                     Box(
                         modifier = Modifier
