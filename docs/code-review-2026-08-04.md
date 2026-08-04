@@ -3,12 +3,14 @@
 Full read of the ~1,800 lines of Kotlin under `app/src/main`, plus the Gradle config,
 manifest and tests.
 
-**10 of the 12 numbered items are fixed.** Defect 3 and inefficiency 9 remain, along with
-3 entries on the simplification list.
+**10 of the 12 numbered items are fixed.** Defects 3 and 14 and inefficiency 9 remain,
+along with 3 entries on the simplification list.
 
-Two findings arrived after the original review and sit outside its numbering, both now
-fixed: the inverted ASCII glyph density, found while writing tests for item 6; and item 13,
-the cost of `toAsciiText`'s per-pixel mapping, found while measuring item 9.
+Three findings arrived after the original review and sit outside its numbering: the
+inverted ASCII glyph density, found while writing tests for item 6; item 13, the cost of
+`toAsciiText`'s per-pixel mapping, found while measuring item 9; and item 14, contrast not
+reaching colour output, found by tracing what the grayscale bitmap is used for. The first
+two are fixed.
 
 Numbering is otherwise preserved from the original review so items stay traceable across
 the fixes, which is why the fixed list below is not in numeric order.
@@ -296,6 +298,49 @@ loaded-but-paused video, or the tab merely being open, now costs nothing.
 ---
 
 ## ⬜ Open — defects
+
+### 14. Contrast is not applied to colour output
+
+`ImageProcessor.kt:145`
+
+Not in the original review — found by tracing what the grayscale bitmap is used for when
+Colour is on.
+
+`processLumaFrame` computes a contrast-adjusted luma for the grayscale path but passes the
+**raw** luma to the colour path:
+
+```kotlin
+val gray = lumaBuffer.get(lumaIndex).toInt() and 0xFF   // raw
+val adjustedGray = /* contrast applied to gray */
+lumaOutputPixels[outIndex] = ...adjustedGray...          // grayscale bitmap
+colorPixels?.set(outIndex, yuvToArgb(gray, uValue, vValue))   // raw luma
+```
+
+In Colour + Image mode `ImagePreview` builds its bitmap from `asciiColors` alone and reads
+nothing but `width`/`height` off the grayscale bitmap, so contrast affects nothing on
+screen. In Colour + ASCII mode contrast still changes which glyph is chosen — `toAsciiText`
+reads the adjusted bitmap — but not the colour those glyphs are tinted with.
+
+Measured on a Pixel 3 against a static scene, sampling luminance across the preview area,
+with grayscale mode as a positive control:
+
+| Mode | Luminance stddev, contrast min → max |
+| --- | --- |
+| Grayscale (control) | 14.62 → 111.24 (+661%) |
+| Colour | 81.77 → 81.76 (0%) |
+
+Not a weak effect — no effect. The README's Notes claim contrast "update[s] in real-time on
+both tabs", which does not hold for this combination.
+
+Two related observations, neither addressed by fixing the above:
+
+- The video pipeline looks like it has the same gap. `processBitmap` copies the source
+  pixels into `colorPixels` verbatim while applying contrast only to the grayscale output.
+  Unverified — it needs a video file loaded — and the fix would differ, since that path has
+  RGB rather than YUV in hand.
+- In Colour + Image mode the entire grayscale bitmap is computed and discarded: per-pixel
+  contrast arithmetic, a ~130 KB allocation and a `setPixels`, every frame, for a result
+  only two integers are read from.
 
 ### 3. Bitmap recycled while still held in Compose state
 
