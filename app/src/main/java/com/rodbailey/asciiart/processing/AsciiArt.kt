@@ -57,7 +57,11 @@ object AsciiArt {
             for (x in 0 until width) {
                 val color = pixels[rowOffset + x]
                 val gray = color and 0xFF
-                val index = ((255 - gray) * (sortedChars.size - 1) / 255f).roundToInt()
+                // sortedChars ascends in density, so intensity maps straight to the index:
+                // bright pixels reach the dense end ('@', '#'), dark pixels stay near ' '.
+                // Do not invert to (255 - gray) — on the black background of ASCII mode that
+                // blanks out the bright parts of the scene and inks the dark ones.
+                val index = (gray * (sortedChars.size - 1) / 255f).roundToInt()
                     .coerceIn(0, sortedChars.lastIndex)
                 textBuilder.append(sortedChars[index])
             }
