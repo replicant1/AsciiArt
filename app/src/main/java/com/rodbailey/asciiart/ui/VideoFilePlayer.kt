@@ -241,7 +241,6 @@ fun ExoPlayerVideoFileTab(
                         asciiText = asciiText,
                         asciiColors = asciiColors,
                         colorEnabled = colorEnabled,
-                        drawSourceImage = false,
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {

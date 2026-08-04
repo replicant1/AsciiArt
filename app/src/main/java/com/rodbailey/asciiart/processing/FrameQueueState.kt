@@ -18,12 +18,6 @@ class FrameQueueState {
     private var frameSkipCounter = 0
 
     /**
-     * Last playback position we actually processed.
-     * Used to prevent re-processing the same frame (unless explicitly re-requested due to parameter changes).
-     */
-    private var lastProcessedTimeMs = 0L
-
-    /**
      * Detects when playback has jumped backward (user seeked or video looped).
      * When detected, resets all tracking state to start fresh.
      *
@@ -33,7 +27,6 @@ class FrameQueueState {
         // If position jumped back by >1 second, it's a restart
         if (currentTimeMs < lastQueuedTimeMs - 1000) {
             lastQueuedTimeMs = 0
-            lastProcessedTimeMs = 0
             frameSkipCounter = 0
             return true
         }
@@ -70,28 +63,4 @@ class FrameQueueState {
         lastQueuedTimeMs = frameTimeMs
     }
 
-    /**
-     * Determines if a frame should be processed.
-     *
-     * Logic:
-     * - Allow re-processing of the same frame (for parameter changes like scale/contrast)
-     * - Allow processing of new frames if 50ms+ has passed since last processing
-     *   (prevents processing rapid duplicates if extraction is slow)
-     *
-     * @param frameTimeMs timestamp of frame to potentially process
-     * @return true if frame should be processed
-     */
-    fun shouldProcessFrame(frameTimeMs: Long): Boolean {
-        val isSameFrame = frameTimeMs == lastProcessedTimeMs
-        val isNewFrameAfterDelay = frameTimeMs > lastProcessedTimeMs + 50
-        return isSameFrame || isNewFrameAfterDelay
-    }
-
-    /**
-     * Records that a frame has been processed.
-     * Called after extraction and ASCII generation complete.
-     */
-    fun recordProcessedFrame(frameTimeMs: Long) {
-        lastProcessedTimeMs = frameTimeMs
-    }
 }

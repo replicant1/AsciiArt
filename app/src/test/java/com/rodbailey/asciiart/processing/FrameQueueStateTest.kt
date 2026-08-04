@@ -17,8 +17,7 @@ class FrameQueueStateTest {
     fun detectPlaybackRestart_jumpBackMoreThan1Second_resetsState() {
         // Arrange: Record a frame at 5000ms
         state.recordQueuedFrame(5000)
-        state.recordProcessedFrame(5000)
-        
+
         // Act: Jump back to 3000ms (2 second jump)
         val restarted = state.detectPlaybackRestart(3000)
         
@@ -134,65 +133,6 @@ class FrameQueueStateTest {
     }
 
     @Test
-    fun shouldProcessFrame_sameFrame_returnsTrue() {
-        // Arrange: Record processing of frame at 1000ms
-        state.recordProcessedFrame(1000)
-        
-        // Act: Try to process same frame again (for parameter changes)
-        val shouldProcess = state.shouldProcessFrame(1000)
-        
-        // Assert
-        assertTrue("Should allow re-processing of same frame", shouldProcess)
-    }
-
-    @Test
-    fun shouldProcessFrame_newFrameTooSoon_returnsFalse() {
-        // Arrange
-        state.recordProcessedFrame(1000)
-        
-        // Act: Only 40ms passed (need 50ms for new frames)
-        val shouldProcess = state.shouldProcessFrame(1040)
-        
-        // Assert
-        assertFalse("Should not process new frame < 50ms after last", shouldProcess)
-    }
-
-    @Test
-    fun shouldProcessFrame_newFrameAt50msExactly_returnsFalse() {
-        // Arrange
-        state.recordProcessedFrame(1000)
-        
-        // Act: Exactly 50ms elapsed (condition is > 50, not >= 50)
-        val shouldProcess = state.shouldProcessFrame(1050)
-        
-        // Assert
-        assertFalse("Should not process at exactly 50ms", shouldProcess)
-    }
-
-    @Test
-    fun shouldProcessFrame_newFrameAfter50ms_returnsTrue() {
-        // Arrange
-        state.recordProcessedFrame(1000)
-        
-        // Act: 51ms elapsed
-        val shouldProcess = state.shouldProcessFrame(1051)
-        
-        // Assert
-        assertTrue("Should process new frame > 50ms after last", shouldProcess)
-    }
-
-    @Test
-    fun shouldProcessFrame_firstFrame_returnsTrue() {
-        // Arrange: No frame processed yet (lastProcessedTimeMs = 0)
-        
-        // Act: Request processing of frame at 1000ms
-        val shouldProcess = state.shouldProcessFrame(1000)
-        
-        // Assert
-        assertTrue("Should process first frame", shouldProcess)
-    }
-
-    @Test
     fun recordQueuedFrame_updatesState() {
         // Arrange
         state.shouldQueueFrame(100, skipRate = 1)  // Increments counter
@@ -205,18 +145,6 @@ class FrameQueueStateTest {
     }
 
     @Test
-    fun recordProcessedFrame_updatesState() {
-        // Arrange
-        state.recordProcessedFrame(1000)
-        
-        // Act: Verify state was updated
-        val shouldProcess = state.shouldProcessFrame(1050)  // Not enough delay yet
-        
-        // Assert
-        assertFalse("recordProcessedFrame should update processing timestamp", shouldProcess)
-    }
-
-    @Test
     fun integrationTest_fullFrameLifecycle() {
         // Test a realistic scenario: Queue frames, detect restart, re-queue
         
@@ -225,8 +153,7 @@ class FrameQueueStateTest {
         state.recordQueuedFrame(5000)
         assertTrue(state.shouldQueueFrame(5200, skipRate = 2))   // Queue
         state.recordQueuedFrame(5200)
-        state.recordProcessedFrame(5200)
-        
+
         // User seeks back by 3 seconds (5200 - 3000 = 2200)
         assertTrue(state.detectPlaybackRestart(2200))  // Jump back detected
         
@@ -235,8 +162,7 @@ class FrameQueueStateTest {
         state.recordQueuedFrame(2300)
         assertTrue(state.shouldQueueFrame(2400, skipRate = 2))
         state.recordQueuedFrame(2400)
-        state.recordProcessedFrame(2400)
-        
+
         // Normal processing continues
         assertFalse(state.shouldQueueFrame(2500, skipRate = 2))  // Skip pattern resumes
     }
