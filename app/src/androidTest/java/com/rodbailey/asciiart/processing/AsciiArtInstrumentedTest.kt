@@ -8,6 +8,7 @@ import android.graphics.Rect
 import android.graphics.Typeface
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -119,6 +120,51 @@ class AsciiArtInstrumentedTest {
             "a bright pixel should ink more than a dark one, got '$brightest' vs '$darkest'",
             inkCoverage(brightest) > inkCoverage(darkest)
         )
+    }
+
+    /**
+     * AsciiGridPreview derives each row's bounds arithmetically as `y * (width + 1)`
+     * instead of scanning for newlines, which is only valid while every row is exactly
+     * `width` characters followed by a single '\n'. Pin that layout here — if the
+     * separator or row padding ever changes, this fails instead of the UI silently
+     * drawing shifted rows.
+     */
+    @Test
+    fun toAsciiText_laysRowsOutAtAFixedStride() {
+        val width = 7
+        val height = 5
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(width * height) { i ->
+            val gray = (i * 255) / (width * height - 1)
+            Color.rgb(gray, gray, gray)
+        }
+        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+        val text = try {
+            AsciiArt.toAsciiText(bitmap, AsciiCharsetPreset.PRINTABLE)
+        } finally {
+            bitmap.recycle()
+        }
+
+        assertEquals(
+            "text should be width*height glyphs plus height-1 separators",
+            width * height + (height - 1),
+            text.length
+        )
+
+        val stride = width + 1
+        for (y in 0 until height) {
+            val start = y * stride
+            val end = start + width
+            assertFalse(
+                "row $y (indices $start until $end) must not span a newline",
+                text.substring(start, end).contains('\n')
+            )
+            if (y < height - 1) {
+                assertEquals("row $y must be followed by a newline", '\n', text[end])
+            } else {
+                assertEquals("the last row must end the string", text.length, end)
+            }
+        }
     }
 
     /** Ink coverage must rise monotonically with scene brightness across the whole ramp. */

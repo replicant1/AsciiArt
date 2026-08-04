@@ -88,6 +88,44 @@ the old keys, if it arrived after that effect's last run, `setVideoTextureView` 
 fired and the ASCII view sat on "Waiting for video frames..." until the user toggled the
 mode. Keying on the TextureView makes the ordering irrelevant.
 
+### 7. `rowOffsets` was scanned and allocated every frame for a constant
+
+`toAsciiText` emits exactly `width` chars per row with `\n` between, so row `y` always
+starts at `y * (bitmap.width + 1)`. The `remember(asciiText)` block did a full ~32K-char
+scan plus an `IntArray` allocation per frame to rediscover that. Both draw loops now
+compute row bounds directly and the block is gone.
+
+That arithmetic depends on a layout invariant of `toAsciiText` which nothing pinned, so
+`AsciiArtInstrumentedTest.toAsciiText_laysRowsOutAtAFixedStride` now asserts it — a change
+to the separator fails the test instead of silently shifting every row on screen.
+
+### 8. Up to 32K `drawRect` calls per frame
+
+Colour Image mode drew one rect per grid cell — 32,400 canvas ops per frame at scaleFactor
+8 on a Pixel 3, roughly 972,000/sec at 30fps — to paint what is really a small image scaled
+up. The grayscale branch alongside it already handed a single bitmap to `Image`.
+
+Colour mode now builds `Bitmap.createBitmap(asciiColors, width, height, ARGB_8888)` and
+takes that same path, so `ImagePreview` collapses to one `Image` call. `ContentScale.Fit`
+performs the aspect-fit-and-centre the loop did by hand, and `FilterQuality.None` is what
+keeps cells blocky rather than interpolated.
+
+This trades ~130 KB of short-lived allocation per frame for 32K canvas ops — a deliberate
+swap, and consistent with `ImageProcessor.processBitmap` and
+`CameraFrameAnalyzer.rotateBitmapIfNeeded`, which already allocate a bitmap per frame. A
+`remember`ed mutable bitmap would avoid the allocation but means mutating a bitmap Compose
+may still hold in a recorded display list — the hazard behind item 3.
+
+It also removes one of the two copies of the letterbox math noted in the simplification
+list; `AsciiGridPreview` still has its own, because it needs the rect to place glyphs.
+
+### 10. Per-pixel branch that was a plain copy
+
+`colorPixels[i] = argb` was exactly `bitmapInputPixels[i]`, so it is now a single
+`copyOf(size)` before the loop, dropping a branch from the hot path. `copyOf(size)` also
+trims the reusable input buffer, which can be longer than the current frame needs; the
+previous `IntArray(size)` was already exactly sized, so the result is identical.
+
 ### 12. 60Hz main-thread poll that never stopped
 
 The `while(true) { … delay(16) }` loop ran for the whole lifetime of the Video tab, even
@@ -127,37 +165,14 @@ currently produce that), but it silently breaks the stated contract.
 
 ## ⬜ Open — inefficiencies
 
-### 7. `rowOffsets` is scanned and allocated every frame for a constant
-
-`AsciiPreviewScreen.kt:487-496`
-
-`toAsciiText` emits exactly `width` chars per row with `\n` between, so row `y` always
-starts at `y * (bitmap.width + 1)`. The `remember(asciiText)` block does a full ~32K-char
-scan plus an `IntArray` allocation per frame to rediscover that. The whole block can go,
-replaced by arithmetic in the loops.
-
-### 8. Up to 32K `drawRect` calls per frame
-
-`AsciiPreviewScreen.kt:448-456`
-
-Colour Image mode draws one rect per cell. `Bitmap.createBitmap(asciiColors, w, h, ARGB_8888)`
-drawn once with `FilterQuality.None` produces an identical result in a single draw op.
-
 ### 9. `setPixels` → `getPixels` round trip
 
-`ImageProcessor.kt:134` → `AsciiArt.kt:51-52`
+`ImageProcessor.kt:133` → `AsciiArt.kt:51-52`
 
 On the video path, `processBitmap` writes `bitmapOutputPixels` into a fresh bitmap, then
 `toAsciiText` immediately reads that same data back out into a newly allocated
 `IntArray(width*height)`. Passing the int array (or a grayscale `ByteArray`) directly to
 the ASCII mapper skips two copies and a per-frame allocation.
-
-### 10. Per-pixel branch that is a plain copy
-
-`ImageProcessor.kt:110,128-130`
-
-`colorPixels[i] = argb` is exactly `bitmapInputPixels[i]`. Hoist it to
-`bitmapInputPixels.copyOf(size)` before the loop and drop the branch from the hot path.
 
 ### 11. Two full-bitmap rotations per camera frame
 
@@ -182,9 +197,7 @@ doing.
   has to null-guard; `remember { ExoPlayer.Builder(context).build() }` removes the nullability
   and the guards. The three `rememberUpdatedState` setter wrappers are also unnecessary — a
   lambda capturing a `MutableState` delegate stays valid across recomposition.
-- **Duplicated letterbox math** — `AsciiPreviewScreen.kt:428-444` and `:531-547` are the same
-  aspect-fit computation.
-- **`AsciiPreviewScreen.kt:514-524`** — `CACHE_CELL_WIDTH` etc. and `TEXT_SIZE_CELL_FRACTION` are
+- **`AsciiPreviewScreen.kt:486-496`** — `CACHE_CELL_WIDTH` etc. and `TEXT_SIZE_CELL_FRACTION` are
   `SCREAMING_CASE` locals inside a composable; they belong at file scope as `private const val`.
 - **`AsciiPreviewScreen.kt:113`** — `.coerceIn(2, 48)` is redundant against `valueRange = 2f..48f`.
   The slider also has no `steps`, so dragging fires many `onValueChange` calls that resolve to the
