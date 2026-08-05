@@ -56,6 +56,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.rodbailey.asciiart.camera.CameraFrameAnalyzer
 import com.rodbailey.asciiart.processing.AsciiDisplayMode
 import com.rodbailey.asciiart.processing.FrameProcessingResult
+import com.rodbailey.asciiart.processing.GridSize
+import com.rodbailey.asciiart.processing.PixelGrid
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
@@ -248,8 +250,7 @@ private fun CameraTabContent(
             )
 
             frame != null && displayMode == AsciiDisplayMode.ASCII -> AsciiGridPreview(
-                gridWidth = frame.gridWidth,
-                gridHeight = frame.gridHeight,
+                gridSize = frame.gridSize,
                 asciiText = frame.asciiText,
                 asciiColors = frame.asciiColors,
                 colorEnabled = colorEnabled,
@@ -425,22 +426,22 @@ fun ImagePreview(
 }
 
 /**
- * Draws [asciiText] as a [gridWidth] x [gridHeight] grid of glyphs.
+ * Draws [asciiText] as a [gridSize] grid of glyphs.
  *
- * The dimensions arrive as two integers because that is all this ever wanted. It used to
+ * The dimensions arrive as a [GridSize] because that is all this ever wanted. It used to
  * take the grayscale `Bitmap` and read `.width`/`.height` off it — never a pixel — which
  * read as if the image were being drawn here and kept a full-size bitmap alive per frame
  * to carry two numbers.
  */
 @Composable
 fun AsciiGridPreview(
-    gridWidth: Int,
-    gridHeight: Int,
+    gridSize: GridSize,
     asciiText: String,
-    asciiColors: IntArray?,
+    asciiColors: PixelGrid?,
     colorEnabled: Boolean,
     modifier: Modifier,
 ) {
+    val (gridWidth, gridHeight) = gridSize
     // AsciiArt.toAsciiText emits exactly gridWidth characters per row, separated by
     // '\n', so row y starts at y * (gridWidth + 1). Row bounds are pure arithmetic —
     // no newline scan and no offsets array, which previously cost an O(text) scan plus an
@@ -549,8 +550,7 @@ fun AsciiGridPreview(
                     val rowEnd = minOf(rowStart + gridWidth, asciiText.length)
                     val textY = drawOffsetY + (y * cellHeight) + baselineOffset
                     for (x in 0 until gridWidth) {
-                        val pixelIndex = (y * gridWidth) + x
-                        textPaint.color = asciiColors?.getOrNull(pixelIndex) ?: defaultAsciiColor
+                        textPaint.color = asciiColors?.getOrNull(x, y) ?: defaultAsciiColor
                         singleChar[0] = if (rowStart + x < rowEnd) asciiText[rowStart + x] else ' '
                         val textX = rowStartX + (x * cellWidth)
                         nativeCanvas.drawText(singleChar, 0, 1, textX, textY, textPaint)

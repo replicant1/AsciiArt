@@ -137,7 +137,7 @@ class AsciiArtInstrumentedTest {
             val gray = (i * 255) / (width * height - 1)
             Color.rgb(gray, gray, gray)
         }
-        val text = AsciiArt.toAsciiText(pixels, width, height)
+        val text = AsciiArt.toAsciiText(pixels, GridSize(width, height))
 
         assertEquals(
             "text should be width*height glyphs plus height-1 separators",
@@ -187,7 +187,7 @@ class AsciiArtInstrumentedTest {
      */
     private fun recoverSortedCharset(): List<Char> {
         val pixels = IntArray(256) { gray -> Color.rgb(gray, gray, gray) }
-        val text = AsciiArt.toAsciiText(pixels, width = 256, height = 1)
+        val text = AsciiArt.toAsciiText(pixels, GridSize(width = 256, height = 1))
 
         val sorted = ArrayList<Char>()
         for (char in text) {
@@ -199,7 +199,7 @@ class AsciiArtInstrumentedTest {
     /** The glyph `toAsciiText` selects for a single pixel of the given grey [intensity]. */
     private fun asciiFor(intensity: Int): Char {
         val pixel = intArrayOf(Color.rgb(intensity, intensity, intensity))
-        return AsciiArt.toAsciiText(pixel, width = 1, height = 1).single()
+        return AsciiArt.toAsciiText(pixel, GridSize(width = 1, height = 1)).single()
     }
 
     /**

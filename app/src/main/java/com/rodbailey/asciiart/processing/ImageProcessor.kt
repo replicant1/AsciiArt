@@ -22,11 +22,17 @@ data class FrameProcessingResult(
     val displayBitmap: Bitmap?,
     /** Glyph rows for ASCII mode; empty in Image mode, which does not convert. */
     val asciiText: String,
-    /** Per-cell ARGB tints for the glyphs in ASCII + Colour; null in every other case. */
-    val asciiColors: IntArray?,
-    /** De-res grid size, after rotation. The UI lays out cells from these. */
-    val gridWidth: Int,
-    val gridHeight: Int
+    /**
+     * Per-cell ARGB tints for the glyphs in ASCII + Colour; null in every other case.
+     * A [PixelGrid] rather than a raw array because this is the one thing here that outlives
+     * the call and is held in Compose state — see [ScratchGrid.freeze].
+     */
+    val asciiColors: PixelGrid?,
+    /**
+     * De-res grid size, after rotation. Carried separately from [asciiColors] because the UI
+     * needs it in every mode and the colour grid exists in only one of the four.
+     */
+    val gridSize: GridSize
 )
 
 /**
@@ -79,22 +85,13 @@ internal fun rotationMap(width: Int, height: Int, rotationDegrees: Int): Rotatio
 
 object ImageProcessor {
 
-    // Pre-allocated buffers for processLumaFrame (camera pipeline, single background thread).
-    // Both are consumed within the call that fills them, so reuse is safe.
-    //
-    // lumaColorScratch covers Colour + Image mode only, where the colour grid is copied into
-    // the display bitmap and never seen again. In ASCII + Colour the grid escapes to Compose
-    // state as asciiColors, so that case allocates fresh: a reused buffer would be
-    // overwritten underneath the UI while it is still being drawn. That is precisely the
-    // bug item 4 fixed, so the two cases are kept apart here rather than sharing one buffer.
-    private var lumaOutputPixels = IntArray(0)
-    private var lumaColorScratch = IntArray(0)
-
-    // Pre-allocated buffers for processBitmap (video pipeline, IO coroutine).
-    // Both are consumed (read/written) entirely within each call before the next call can start.
-    // colorPixels is NOT pre-allocated here because it escapes as asciiColors to Compose state.
-    private var bitmapInputPixels = IntArray(0)
-    private var bitmapOutputPixels = IntArray(0)
+    // Reusable buffers, one set per pipeline: the camera analysis executor and the video IO
+    // dispatcher each run one call at a time, so a buffer is only ever touched by the call
+    // that prepared it. Nothing here escapes; what the UI keeps comes from freeze().
+    private val lumaGrayscale = ScratchGrid()
+    private val lumaColor = ScratchGrid()
+    private val videoInput = ScratchGrid()
+    private val videoGrayscale = ScratchGrid()
 
     /**
      * Downsamples a camera frame into a de-res grid, applying [rotationDegrees] as it goes.
@@ -142,20 +139,14 @@ object ImageProcessor {
         // The contrast arithmetic below stays either way — yuvToArgb needs it.
         val grayscaleNeeded = !(colorEnabled && imageMode)
 
-        val size = outputWidth * outputHeight
-        if (grayscaleNeeded && lumaOutputPixels.size < size) lumaOutputPixels = IntArray(size)
-        val colorPixels: IntArray? = when {
-            !colorEnabled -> null
-            // Copied into the display bitmap and dropped, so the buffer can be reused.
-            imageMode -> {
-                if (lumaColorScratch.size < size) lumaColorScratch = IntArray(size)
-                lumaColorScratch
-            }
-            // Escapes to Compose as asciiColors, so it has to be its own exactly-sized array.
-            else -> IntArray(size)
-        }
-
         val rotation = rotationMap(outputWidth, outputHeight, rotationDegrees)
+        val gridSize = GridSize(rotation.destWidth, rotation.destHeight)
+        // Both modes write the colour grid into the same buffer. Only ASCII mode hands it on,
+        // and it does that by freezing, so the "does this escape?" question is answered once
+        // at the return rather than by picking an allocation strategy up here.
+        if (grayscaleNeeded) lumaGrayscale.prepare(gridSize)
+        if (colorEnabled) lumaColor.prepare(gridSize)
+
         val uPlane = image.planes[1]
         val vPlane = image.planes[2]
         val uBuffer = uPlane.buffer
@@ -173,7 +164,7 @@ object ImageProcessor {
                 val contrastAdjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
                 val outIndex = rotatedRowBase + (rotation.stepX * x)
                 if (grayscaleNeeded) {
-                    lumaOutputPixels[outIndex] = (0xFF shl 24) or
+                    lumaGrayscale[outIndex] = (0xFF shl 24) or
                         (contrastAdjustedGray shl 16) or
                         (contrastAdjustedGray shl 8) or
                         contrastAdjustedGray
@@ -191,23 +182,21 @@ object ImageProcessor {
                     // where the displayed pixels come from this array alone. Chroma (U, V)
                     // is deliberately untouched, so contrast changes brightness separation
                     // without shifting hue or saturation.
-                    colorPixels?.set(outIndex, yuvToArgb(contrastAdjustedGray, uValue, vValue))
+                    lumaColor[outIndex] = yuvToArgb(contrastAdjustedGray, uValue, vValue)
                 }
             }
         }
 
         return FrameProcessingResult(
             displayBitmap = displayBitmapFor(
-                imageMode, colorPixels, lumaOutputPixels, rotation.destWidth, rotation.destHeight
+                imageMode,
+                colorPixels = if (colorEnabled) lumaColor else null,
+                grayscalePixels = lumaGrayscale,
+                gridSize = gridSize
             ),
-            asciiText = if (imageMode) {
-                ""
-            } else {
-                AsciiArt.toAsciiText(lumaOutputPixels, rotation.destWidth, rotation.destHeight)
-            },
-            asciiColors = if (imageMode) null else colorPixels,
-            gridWidth = rotation.destWidth,
-            gridHeight = rotation.destHeight
+            asciiText = if (imageMode) "" else AsciiArt.toAsciiText(lumaGrayscale.raw, gridSize),
+            asciiColors = if (imageMode || !colorEnabled) null else lumaColor.freeze(),
+            gridSize = gridSize
         )
     }
 
@@ -232,20 +221,14 @@ object ImageProcessor {
         val grayscaleNeeded = !(colorEnabled && imageMode)
 
         val size = width * height
-        if (bitmapInputPixels.size < size) bitmapInputPixels = IntArray(size)
-        if (grayscaleNeeded && bitmapOutputPixels.size < size) bitmapOutputPixels = IntArray(size)
-        bitmap.getPixels(bitmapInputPixels, 0, width, 0, 0, width, height)
-
-        // The colour grid is just the source pixels verbatim, so copy it in one go rather
-        // than assigning element-by-element inside the loop below. copyOf(size) also trims
-        // the reusable input buffer, which may be longer than this frame needs. Image mode
-        // skips even that: there the colour grid goes straight into the display bitmap,
-        // which copies it, so the input buffer can be handed over as-is.
-        val colorPixels = if (colorEnabled && !imageMode) bitmapInputPixels.copyOf(size) else null
+        val gridSize = GridSize(width, height)
+        videoInput.prepare(gridSize)
+        if (grayscaleNeeded) videoGrayscale.prepare(gridSize)
+        bitmap.getPixels(videoInput.raw, 0, width, 0, 0, width, height)
 
         if (grayscaleNeeded) {
             for (i in 0 until size) {
-                val argb = bitmapInputPixels[i]
+                val argb = videoInput[i]
                 val r = (argb shr 16) and 0xFF
                 val g = (argb shr 8) and 0xFF
                 val b = argb and 0xFF
@@ -255,7 +238,7 @@ object ImageProcessor {
                 val contrastedGray = (((gray - 128f) * contrast) + 128f).coerceIn(0f, 255f)
                 val contrastAdjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
 
-                bitmapOutputPixels[i] = (0xFF shl 24) or
+                videoGrayscale[i] = (0xFF shl 24) or
                     (contrastAdjustedGray shl 16) or
                     (contrastAdjustedGray shl 8) or
                     contrastAdjustedGray
@@ -265,15 +248,15 @@ object ImageProcessor {
         return FrameProcessingResult(
             displayBitmap = displayBitmapFor(
                 imageMode,
-                colorPixels = if (colorEnabled) bitmapInputPixels else null,
-                grayscalePixels = bitmapOutputPixels,
-                width = width,
-                height = height
+                // The colour output on this path is the source pixels verbatim, so the input
+                // buffer is the colour grid.
+                colorPixels = if (colorEnabled) videoInput else null,
+                grayscalePixels = videoGrayscale,
+                gridSize = gridSize
             ),
-            asciiText = if (imageMode) "" else AsciiArt.toAsciiText(bitmapOutputPixels, width, height),
-            asciiColors = colorPixels,
-            gridWidth = width,
-            gridHeight = height
+            asciiText = if (imageMode) "" else AsciiArt.toAsciiText(videoGrayscale.raw, gridSize),
+            asciiColors = if (imageMode || !colorEnabled) null else videoInput.freeze(),
+            gridSize = gridSize
         )
     }
 
@@ -290,16 +273,18 @@ object ImageProcessor {
      */
     private fun displayBitmapFor(
         imageMode: Boolean,
-        colorPixels: IntArray?,
-        grayscalePixels: IntArray,
-        width: Int,
-        height: Int
-    ): Bitmap? = when {
-        !imageMode -> null
-        colorPixels != null ->
-            Bitmap.createBitmap(colorPixels, width, height, Bitmap.Config.ARGB_8888)
-        else -> Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
-            setPixels(grayscalePixels, 0, width, 0, 0, width, height)
+        colorPixels: ScratchGrid?,
+        grayscalePixels: ScratchGrid,
+        gridSize: GridSize
+    ): Bitmap? {
+        val (width, height) = gridSize
+        return when {
+            !imageMode -> null
+            colorPixels != null ->
+                Bitmap.createBitmap(colorPixels.raw, width, height, Bitmap.Config.ARGB_8888)
+            else -> Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+                setPixels(grayscalePixels.raw, 0, width, 0, 0, width, height)
+            }
         }
     }
 
