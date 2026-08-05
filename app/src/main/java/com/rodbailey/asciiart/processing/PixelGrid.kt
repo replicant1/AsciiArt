@@ -17,13 +17,13 @@ data class GridSize(val width: Int, val height: Int) {
  *
  * This is the type that may cross to the main thread and be held in Compose state. Its array
  * is private and its only constructor is internal, so the sole way to obtain one is
- * [ScratchGrid.freeze] — which copies. That is the point: item 4 was a shared scratch buffer
- * escaping to Compose state and being overwritten by the next frame mid-draw, and the rule
- * that prevents it ("copy anything that outlives the call") lived in a comment. Here,
- * forgetting to copy is a type error rather than a race found on a device.
+ * [PixelBuffer.freeze] — which copies. That is the point: item 4 was a reused buffer escaping
+ * to Compose state and being overwritten by the next frame mid-draw, and the rule that
+ * prevents it ("copy anything that outlives the call") lived in a comment. Here, forgetting
+ * to copy is a type error rather than a race found on a device.
  *
  * The copy is not new cost. Both pipelines already allocate a per-frame array for exactly
- * this reason; [ScratchGrid.freeze] is where that allocation now happens.
+ * this reason; [PixelBuffer.freeze] is where that allocation now happens.
  */
 @Immutable
 class PixelGrid internal constructor(
@@ -59,7 +59,7 @@ class PixelGrid internal constructor(
  * the downsample. A 2D setter would mean recovering coordinates the loop deliberately
  * never computes.
  */
-internal class ScratchGrid {
+internal class PixelBuffer {
 
     private var buffer = IntArray(0)
 
@@ -67,7 +67,7 @@ internal class ScratchGrid {
         private set
 
     /** Grows the buffer if this frame needs more room, and records the size in use. */
-    fun prepare(size: GridSize): ScratchGrid {
+    fun prepare(size: GridSize): PixelBuffer {
         if (buffer.size < size.cellCount) buffer = IntArray(size.cellCount)
         this.size = size
         return this
@@ -80,12 +80,14 @@ internal class ScratchGrid {
     }
 
     /**
-     * The raw array, for the platform APIs that take a flat array and a stride — `getPixels`,
-     * `setPixels`, `createBitmap`. They copy out of or into it within the call, so nothing
-     * retains it. This is the one hole in the ownership rule above; keep its callers to that
-     * boundary.
+     * The backing array, for the platform APIs that take a flat array and a stride —
+     * `getPixels`, `setPixels`, `createBitmap`. They copy out of or into it within the call,
+     * so nothing retains it.
+     *
+     * This is the one hole in the ownership rule above, which is why it is named to look
+     * wrong anywhere else. Keep its callers at that boundary.
      */
-    val raw: IntArray get() = buffer
+    val pixelsForPlatformApi: IntArray get() = buffer
 
     /** A copy of the live cells, safe to hand to Compose. */
     fun freeze(): PixelGrid = PixelGrid(buffer.copyOf(size.cellCount), size)

@@ -25,7 +25,7 @@ data class FrameProcessingResult(
     /**
      * Per-cell ARGB tints for the glyphs in ASCII + Colour; null in every other case.
      * A [PixelGrid] rather than a raw array because this is the one thing here that outlives
-     * the call and is held in Compose state — see [ScratchGrid.freeze].
+     * the call and is held in Compose state — see [PixelBuffer.freeze].
      */
     val asciiColors: PixelGrid?,
     /**
@@ -88,10 +88,10 @@ object ImageProcessor {
     // Reusable buffers, one set per pipeline: the camera analysis executor and the video IO
     // dispatcher each run one call at a time, so a buffer is only ever touched by the call
     // that prepared it. Nothing here escapes; what the UI keeps comes from freeze().
-    private val lumaGrayscale = ScratchGrid()
-    private val lumaColor = ScratchGrid()
-    private val videoInput = ScratchGrid()
-    private val videoGrayscale = ScratchGrid()
+    private val lumaGrayscale = PixelBuffer()
+    private val lumaColor = PixelBuffer()
+    private val videoInput = PixelBuffer()
+    private val videoGrayscale = PixelBuffer()
 
     /**
      * Downsamples a camera frame into a de-res grid, applying [rotationDegrees] as it goes.
@@ -194,7 +194,7 @@ object ImageProcessor {
                 grayscalePixels = lumaGrayscale,
                 gridSize = gridSize
             ),
-            asciiText = if (imageMode) "" else AsciiArt.toAsciiText(lumaGrayscale.raw, gridSize),
+            asciiText = if (imageMode) "" else AsciiArt.toAsciiText(lumaGrayscale.pixelsForPlatformApi, gridSize),
             asciiColors = if (imageMode || !colorEnabled) null else lumaColor.freeze(),
             gridSize = gridSize
         )
@@ -224,7 +224,7 @@ object ImageProcessor {
         val gridSize = GridSize(width, height)
         videoInput.prepare(gridSize)
         if (grayscaleNeeded) videoGrayscale.prepare(gridSize)
-        bitmap.getPixels(videoInput.raw, 0, width, 0, 0, width, height)
+        bitmap.getPixels(videoInput.pixelsForPlatformApi, 0, width, 0, 0, width, height)
 
         if (grayscaleNeeded) {
             for (i in 0 until size) {
@@ -254,7 +254,7 @@ object ImageProcessor {
                 grayscalePixels = videoGrayscale,
                 gridSize = gridSize
             ),
-            asciiText = if (imageMode) "" else AsciiArt.toAsciiText(videoGrayscale.raw, gridSize),
+            asciiText = if (imageMode) "" else AsciiArt.toAsciiText(videoGrayscale.pixelsForPlatformApi, gridSize),
             asciiColors = if (imageMode || !colorEnabled) null else videoInput.freeze(),
             gridSize = gridSize
         )
@@ -273,17 +273,17 @@ object ImageProcessor {
      */
     private fun displayBitmapFor(
         imageMode: Boolean,
-        colorPixels: ScratchGrid?,
-        grayscalePixels: ScratchGrid,
+        colorPixels: PixelBuffer?,
+        grayscalePixels: PixelBuffer,
         gridSize: GridSize
     ): Bitmap? {
         val (width, height) = gridSize
         return when {
             !imageMode -> null
             colorPixels != null ->
-                Bitmap.createBitmap(colorPixels.raw, width, height, Bitmap.Config.ARGB_8888)
+                Bitmap.createBitmap(colorPixels.pixelsForPlatformApi, width, height, Bitmap.Config.ARGB_8888)
             else -> Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
-                setPixels(grayscalePixels.raw, 0, width, 0, 0, width, height)
+                setPixels(grayscalePixels.pixelsForPlatformApi, 0, width, 0, 0, width, height)
             }
         }
     }
