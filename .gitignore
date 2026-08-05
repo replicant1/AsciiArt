@@ -7,6 +7,12 @@
 /.idea/workspace.xml
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
+# Per-machine IDE state, not project configuration: which device was last
+# deployed to (it records the handset's serial number) and how the device
+# table is sorted. The rest of /.idea is shared on purpose.
+/.idea/deploymentTargetSelector.xml
+/.idea/deviceManager.xml
+/.idea/inspectionProfiles/
 .DS_Store
 /build
 /captures
