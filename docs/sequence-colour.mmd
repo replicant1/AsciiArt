@@ -17,7 +17,7 @@ sequenceDiagram
     else Image Mode
         IP->>IP: Create display bitmap from the colour grid
     end
-    IP-->>CFA: FrameProcessingResult (displayBitmap, asciiText, colorGrid, grid size)
+    IP-->>CFA: FrameProcessingResult (displayBitmap, asciiText, grid size,<br/>plus colorGrid in ASCII mode only)
     CFA->>UI: onFrameProcessed(frame)
     alt Image Mode
         UI->>UI: ImagePreview draws the colour bitmap
