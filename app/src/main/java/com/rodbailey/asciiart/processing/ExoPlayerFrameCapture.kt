@@ -194,7 +194,7 @@ class ExoPlayerFrameListener(
     private suspend fun processQueuedFrames() {
         for (bitmap in frameQueue) {
             try {
-                val frameResult = ImageProcessor.processBitmap(
+                val frameResult = ImageProcessor.processVideoFileFrame(
                     bitmap = bitmap,
                     contrastFactor = contrastFactorProvider(),
                     colorEnabled = colorEnabledProvider(),
@@ -211,7 +211,8 @@ class ExoPlayerFrameListener(
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing frame", e)
             } finally {
-                // Return capture bitmap to pool — processBitmap() has finished reading it.
+                // Return capture bitmap to pool — processVideoFileFrame() has finished
+                // reading it.
                 // It will be overwritten by the next getBitmap() call, never read stale.
                 captureBitmapPool.offer(bitmap)
             }

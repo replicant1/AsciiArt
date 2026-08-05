@@ -6,7 +6,7 @@ sequenceDiagram
     participant UI as AsciiPreviewScreen
 
     Camera->>CFA: ImageProxy (YUV)
-    CFA->>IP: processLumaFrame(colorEnabled=true, displayMode, rotationDegrees)
+    CFA->>IP: processLiveCameraFrame(colorEnabled=true, displayMode, rotationDegrees)
     IP->>IP: Read Y plane, downsample
     IP->>IP: Apply contrast adjustment
     IP->>IP: Sample U,V planes, convert YUV to ARGB per cell

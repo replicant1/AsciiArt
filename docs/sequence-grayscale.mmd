@@ -6,7 +6,7 @@ sequenceDiagram
     participant UI as AsciiPreviewScreen
 
     Camera->>CFA: ImageProxy (YUV)
-    CFA->>IP: processLumaFrame(displayMode, rotationDegrees)
+    CFA->>IP: processLiveCameraFrame(displayMode, rotationDegrees)
     IP->>IP: Read Y plane, downsample
     IP->>IP: Apply contrast adjustment
     IP->>IP: Write each cell to its rotated index

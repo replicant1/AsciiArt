@@ -85,16 +85,23 @@ internal fun rotationMap(width: Int, height: Int, rotationDegrees: Int): Rotatio
 
 object ImageProcessor {
 
-    // Reusable buffers, one set per pipeline: the camera analysis executor and the video IO
-    // dispatcher each run one call at a time, so a buffer is only ever touched by the call
-    // that prepared it. Nothing here escapes; what the UI keeps comes from freeze().
-    private val lumaGrayscale = PixelBuffer()
-    private val lumaColor = PixelBuffer()
-    private val videoInput = PixelBuffer()
-    private val videoGrayscale = PixelBuffer()
+    // Reusable buffers, one pair per tab — Live Camera and Video File. The camera analysis
+    // executor and the video IO dispatcher each run one call at a time, so a buffer is only
+    // ever touched by the call that prepared it, and the two pairs never meet.
+    // Nothing here escapes; what the UI keeps comes from freeze().
+    private val liveCameraGrayscale = PixelBuffer()
+    private val liveCameraColor = PixelBuffer()
+    private val videoFileInput = PixelBuffer()
+    private val videoFileGrayscale = PixelBuffer()
 
     /**
-     * Downsamples a camera frame into a de-res grid, applying [rotationDegrees] as it goes.
+     * Downsamples a Live Camera frame into a de-res grid, applying [rotationDegrees] as it
+     * goes.
+     *
+     * Brightness comes from the luma (Y) plane alone — `image.planes[0]` — which is why the
+     * loop below reads a single byte per cell rather than converting YUV. Chroma is sampled
+     * only when Colour is on. This was once called `processLumaFrame` for that reason; the
+     * name now says which tab it serves, since that is what a reader needs to place it.
      *
      * The rotation is folded into this loop rather than applied afterwards. Camera sensors
      * are mounted at a fixed angle — typically 90 degrees on phones like the Pixel 3 — so
@@ -111,7 +118,7 @@ object ImageProcessor {
      * [displayMode] is here so the frame can stop at what will actually be looked at — see
      * `grayscaleNeeded` below and the ASCII conversion at the end.
      */
-    fun processLumaFrame(
+    fun processLiveCameraFrame(
         image: ImageProxy,
         scaleFactor: Int,
         contrastFactor: Float,
@@ -144,8 +151,8 @@ object ImageProcessor {
         // Both modes write the colour grid into the same buffer. Only ASCII mode hands it on,
         // and it does that by freezing, so the "does this escape?" question is answered once
         // at the return rather than by picking an allocation strategy up here.
-        if (grayscaleNeeded) lumaGrayscale.prepare(gridSize)
-        if (colorEnabled) lumaColor.prepare(gridSize)
+        if (grayscaleNeeded) liveCameraGrayscale.prepare(gridSize)
+        if (colorEnabled) liveCameraColor.prepare(gridSize)
 
         val uPlane = image.planes[1]
         val vPlane = image.planes[2]
@@ -164,7 +171,7 @@ object ImageProcessor {
                 val contrastAdjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
                 val outIndex = rotatedRowBase + (rotation.stepX * x)
                 if (grayscaleNeeded) {
-                    lumaGrayscale[outIndex] = (0xFF shl 24) or
+                    liveCameraGrayscale[outIndex] = (0xFF shl 24) or
                         (contrastAdjustedGray shl 16) or
                         (contrastAdjustedGray shl 8) or
                         contrastAdjustedGray
@@ -182,7 +189,7 @@ object ImageProcessor {
                     // where the displayed pixels come from this array alone. Chroma (U, V)
                     // is deliberately untouched, so contrast changes brightness separation
                     // without shifting hue or saturation.
-                    lumaColor[outIndex] = yuvToArgb(contrastAdjustedGray, uValue, vValue)
+                    liveCameraColor[outIndex] = yuvToArgb(contrastAdjustedGray, uValue, vValue)
                 }
             }
         }
@@ -190,22 +197,31 @@ object ImageProcessor {
         return FrameProcessingResult(
             displayBitmap = displayBitmapFor(
                 imageMode,
-                colorPixels = if (colorEnabled) lumaColor else null,
-                grayscalePixels = lumaGrayscale,
+                colorPixels = if (colorEnabled) liveCameraColor else null,
+                grayscalePixels = liveCameraGrayscale,
                 gridSize = gridSize
             ),
-            asciiText = if (imageMode) "" else AsciiArt.toAsciiText(lumaGrayscale.pixelsForPlatformApi, gridSize),
-            asciiColors = if (imageMode || !colorEnabled) null else lumaColor.freeze(),
+            asciiText = if (imageMode) {
+                ""
+            } else {
+                AsciiArt.toAsciiText(liveCameraGrayscale.pixelsForPlatformApi, gridSize)
+            },
+            asciiColors = if (imageMode || !colorEnabled) null else liveCameraColor.freeze(),
             gridSize = gridSize
         )
     }
 
     /**
-     * Downsamples an already-scaled video frame into the same de-res grid the camera
-     * pipeline produces. [displayMode] serves the same purpose as it does there: it keeps
-     * the frame from building anything the chosen mode will not look at.
+     * Downsamples an already-scaled Video File frame into the same de-res grid
+     * [processLiveCameraFrame] produces. [displayMode] serves the same purpose as it does
+     * there: it keeps the frame from building anything the chosen mode will not look at.
+     *
+     * The [bitmap] arrives from `TextureView.getBitmap`, already scaled down by the Scale
+     * factor, so unlike the camera path there is no subsampling step — every source pixel is
+     * one cell. Colour output is the source pixels verbatim, which is why contrast reaches
+     * only the grayscale grid on this path.
      */
-    fun processBitmap(
+    fun processVideoFileFrame(
         bitmap: Bitmap,
         contrastFactor: Float,
         colorEnabled: Boolean,
@@ -215,20 +231,20 @@ object ImageProcessor {
         val width = bitmap.width
         val height = bitmap.height
         val imageMode = displayMode == AsciiDisplayMode.IMAGE
-        // See processLumaFrame: nothing reads the grayscale grid in Colour + Image mode.
+        // See processLiveCameraFrame: nothing reads the grayscale grid in Colour + Image mode.
         // Here that skips the whole conversion loop, since on this path the colour output
         // is the source pixels rather than anything the loop computes.
         val grayscaleNeeded = !(colorEnabled && imageMode)
 
         val size = width * height
         val gridSize = GridSize(width, height)
-        videoInput.prepare(gridSize)
-        if (grayscaleNeeded) videoGrayscale.prepare(gridSize)
-        bitmap.getPixels(videoInput.pixelsForPlatformApi, 0, width, 0, 0, width, height)
+        videoFileInput.prepare(gridSize)
+        if (grayscaleNeeded) videoFileGrayscale.prepare(gridSize)
+        bitmap.getPixels(videoFileInput.pixelsForPlatformApi, 0, width, 0, 0, width, height)
 
         if (grayscaleNeeded) {
             for (i in 0 until size) {
-                val argb = videoInput[i]
+                val argb = videoFileInput[i]
                 val r = (argb shr 16) and 0xFF
                 val g = (argb shr 8) and 0xFF
                 val b = argb and 0xFF
@@ -236,12 +252,12 @@ object ImageProcessor {
                 // Convert RGB to grayscale (luminance)
                 val gray = (0.299f * r + 0.587f * g + 0.114f * b).toInt()
                 val contrastedGray = (((gray - 128f) * contrast) + 128f).coerceIn(0f, 255f)
-                val contrastAdjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
+                val contrastedGrayInt = contrastedGray.roundToInt().coerceIn(0, 255)
 
-                videoGrayscale[i] = (0xFF shl 24) or
-                    (contrastAdjustedGray shl 16) or
-                    (contrastAdjustedGray shl 8) or
-                    contrastAdjustedGray
+                videoFileGrayscale[i] = (0xFF shl 24) or
+                    (contrastedGrayInt shl 16) or
+                    (contrastedGrayInt shl 8) or
+                    contrastedGrayInt
             }
         }
 
@@ -250,12 +266,16 @@ object ImageProcessor {
                 imageMode,
                 // The colour output on this path is the source pixels verbatim, so the input
                 // buffer is the colour grid.
-                colorPixels = if (colorEnabled) videoInput else null,
-                grayscalePixels = videoGrayscale,
+                colorPixels = if (colorEnabled) videoFileInput else null,
+                grayscalePixels = videoFileGrayscale,
                 gridSize = gridSize
             ),
-            asciiText = if (imageMode) "" else AsciiArt.toAsciiText(videoGrayscale.pixelsForPlatformApi, gridSize),
-            asciiColors = if (imageMode || !colorEnabled) null else videoInput.freeze(),
+            asciiText = if (imageMode) {
+                ""
+            } else {
+                AsciiArt.toAsciiText(videoFileGrayscale.pixelsForPlatformApi, gridSize)
+            },
+            asciiColors = if (imageMode || !colorEnabled) null else videoFileInput.freeze(),
             gridSize = gridSize
         )
     }

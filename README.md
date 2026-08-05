@@ -101,7 +101,7 @@ sequenceDiagram
     participant UI as AsciiPreviewScreen
 
     Camera->>CFA: ImageProxy (YUV)
-    CFA->>IP: processLumaFrame(displayMode, rotationDegrees)
+    CFA->>IP: processLiveCameraFrame(displayMode, rotationDegrees)
     IP->>IP: Read Y plane, downsample
     IP->>IP: Apply contrast adjustment
     IP->>IP: Write each cell to its rotated index
@@ -126,7 +126,7 @@ sequenceDiagram
     participant UI as AsciiPreviewScreen
 
     Camera->>CFA: ImageProxy (YUV)
-    CFA->>IP: processLumaFrame(colorEnabled=true, displayMode, rotationDegrees)
+    CFA->>IP: processLiveCameraFrame(colorEnabled=true, displayMode, rotationDegrees)
     IP->>IP: Read Y plane, downsample
     IP->>IP: Apply contrast adjustment
     IP->>IP: Sample U,V planes, convert YUV to ARGB per cell
@@ -162,7 +162,7 @@ sequenceDiagram
         EFL->>EFL: Poll currentPosition every ~16ms
         EFL->>TV: getBitmap(pooledBitmap) at size / scaleFactor
         TV-->>EFL: Bitmap (reused from pool)
-        EFL->>IP: processBitmap(bitmap, contrastFactor, colorEnabled, displayMode)
+        EFL->>IP: processVideoFileFrame(bitmap, contrastFactor, colorEnabled, displayMode)
         alt ASCII Mode
             IP->>AA: toAsciiText(grayscalePixels, gridSize)
             AA-->>IP: ASCII text
@@ -247,8 +247,8 @@ classDiagram
     }
 
     class ImageProcessor {
-        +processLumaFrame()$
-        +processBitmap()$
+        +processLiveCameraFrame()$
+        +processVideoFileFrame()$
         -displayBitmapFor()$
         -yuvToArgb()$
     }
