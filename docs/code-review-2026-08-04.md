@@ -166,7 +166,7 @@ Not in the original review — found by tracing what the grayscale bitmap is use
 Colour is on. It turns out that in Colour + Image mode nothing reads its pixels at all:
 `ImagePreview` builds its bitmap from `asciiColors` and takes only `width`/`height` from it.
 
-`processLumaFrame` computed a contrast-adjusted luma for the grayscale path but passed the
+`processLiveCameraFrame` computed a contrast-adjusted luma for the grayscale path but passed the
 **raw** luma to the colour path — `yuvToArgb(gray, u, v)` rather than the adjusted value.
 So contrast reached only the array that Image mode never displays. In Colour + ASCII mode
 it still selected the glyph, via `toAsciiText` on the adjusted bitmap, but not the colour
@@ -187,7 +187,7 @@ with grayscale mode as a positive control:
 
 Two things this fix does **not** address:
 
-- The video pipeline has the same gap, now confirmed. `processBitmap` copies the source
+- The video pipeline has the same gap, now confirmed. `processVideoFileFrame` copies the source
   pixels into `colorPixels` verbatim while applying contrast only to the grayscale output,
   so with Colour on the slider changes nothing — checked on a loaded video, at 100% and
   194%, and unchanged by item 15, which only made the gap explicit: that mode no longer
@@ -260,7 +260,7 @@ Capture now runs whenever the player is playing, and the Image branch renders
 gone. Only the ASCII text conversion is mode-dependent, so `processQueuedFrames` skips
 `toAsciiText` in Image mode.
 
-Image mode costs more than it did — a GPU→CPU `getBitmap` plus a full `processBitmap` pass
+Image mode costs more than it did — a GPU→CPU `getBitmap` plus a full `processVideoFileFrame` pass
 per frame, where it previously rendered direct. That is inherent to applying the pipeline.
 
 ### 5. `captureTextureView` was not a key of the effect that consumed it
@@ -365,7 +365,7 @@ loaded-but-paused video, or the tab merely being open, now costs nothing.
 
 ### 9. `setPixels` → `getPixels` round trip
 
-`processBitmap` wrote `bitmapOutputPixels` into a fresh bitmap and `toAsciiText` immediately
+`processVideoFileFrame` wrote `bitmapOutputPixels` into a fresh bitmap and `toAsciiText` immediately
 read that same data back out into a newly allocated `IntArray(width * height)`. The camera
 path did the same thing one call later.
 
@@ -485,7 +485,7 @@ arithmetic put it under JVM unit test (`RotationMapTest`, 5 tests). Still uncove
   rather than by anything that would catch a regression. A Compose `captureToImage()` test
   asserting a white input pixel renders white would close the gap, and would have caught the
   original `268b241` regression.
-- **`ImageProcessor.processLumaFrame` / `processBitmap`** — the loops themselves are untested;
+- **`ImageProcessor.processLiveCameraFrame` / `processVideoFileFrame`** — the loops themselves are untested;
   only the rotation mapping they now use is. Both need an `ImageProxy` or a real `Bitmap`.
   Item 15 raised the stakes here: which of `displayBitmap`, `asciiText` and `asciiColors` a
   frame carries now depends on the Display x Colour combination, and nothing asserts that

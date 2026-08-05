@@ -31,7 +31,7 @@ class CameraFrameAnalyzer(
      * them from crossing to the main thread is what lets that buffer stay reusable.
      */
     override fun analyze(image: ImageProxy) {
-        val frameResult = ImageProcessor.processLumaFrame(
+        val frameResult = ImageProcessor.processLiveCameraFrame(
             image = image,
             scaleFactor = scaleFactorProvider(),
             contrastFactor = contrastFactorProvider(),

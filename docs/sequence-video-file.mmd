@@ -11,7 +11,7 @@ sequenceDiagram
         EFL->>EFL: Poll currentPosition every ~16ms
         EFL->>TV: getBitmap(pooledBitmap) at size / scaleFactor
         TV-->>EFL: Bitmap (reused from pool)
-        EFL->>IP: processBitmap(bitmap, contrastFactor, colorEnabled, displayMode)
+        EFL->>IP: processVideoFileFrame(bitmap, contrastFactor, colorEnabled, displayMode)
         alt ASCII Mode
             IP->>AA: toAsciiText(grayscalePixels, gridSize)
             AA-->>IP: ASCII text
