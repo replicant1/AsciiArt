@@ -65,13 +65,32 @@ classDiagram
     class FrameProcessingResult {
         displayBitmap: Bitmap?
         asciiText: String
-        asciiColors: IntArray?
-        gridWidth: Int
-        gridHeight: Int
+        asciiColors: PixelGrid?
+        gridSize: GridSize
+    }
+
+    class GridSize {
+        width: Int
+        height: Int
+        cellCount: Int
+    }
+
+    class PixelGrid {
+        <<immutable>>
+        size: GridSize
+        +get(x, y)
+        +getOrNull(x, y)
+    }
+
+    class PixelBuffer {
+        size: GridSize
+        +prepare(size)
+        +freeze() PixelGrid
+        +pixelsForPlatformApi: IntArray
     }
 
     class AsciiArt {
-        +toAsciiText(grayscalePixels, width, height)$
+        +toAsciiText(grayscalePixels, size)$
         -glyphForIntensity: CharArray
         -buildSortedCharset()$
     }
@@ -94,3 +113,9 @@ classDiagram
     ImageProcessor --> RotationMap
     ImageProcessor --> FrameProcessingResult
     ImageProcessor --> AsciiArt
+    ImageProcessor --> PixelBuffer
+    PixelBuffer ..> PixelGrid : freeze() copies
+    PixelBuffer --> GridSize
+    PixelGrid --> GridSize
+    FrameProcessingResult --> PixelGrid
+    FrameProcessingResult --> GridSize
