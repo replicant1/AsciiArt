@@ -194,19 +194,11 @@ object ImageProcessor {
             }
         }
 
-        return FrameProcessingResult(
-            displayBitmap = displayBitmapFor(
-                imageMode,
-                colorPixels = if (colorEnabled) liveCameraColor else null,
-                grayscalePixels = liveCameraGrayscale,
-                gridSize = gridSize
-            ),
-            asciiText = if (imageMode) {
-                ""
-            } else {
-                AsciiArt.toAsciiText(liveCameraGrayscale.pixelsForPlatformApi, gridSize)
-            },
-            asciiColors = if (imageMode || !colorEnabled) null else liveCameraColor.freeze(),
+        return assembleResult(
+            imageMode = imageMode,
+            colorEnabled = colorEnabled,
+            grayscale = liveCameraGrayscale,
+            colour = liveCameraColor,
             gridSize = gridSize
         )
     }
@@ -252,33 +244,58 @@ object ImageProcessor {
                 // Convert RGB to grayscale (luminance)
                 val gray = (0.299f * r + 0.587f * g + 0.114f * b).toInt()
                 val contrastedGray = (((gray - 128f) * contrast) + 128f).coerceIn(0f, 255f)
-                val contrastedGrayInt = contrastedGray.roundToInt().coerceIn(0, 255)
+                val contrastAdjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
 
                 videoFileGrayscale[i] = (0xFF shl 24) or
-                    (contrastedGrayInt shl 16) or
-                    (contrastedGrayInt shl 8) or
-                    contrastedGrayInt
+                    (contrastAdjustedGray shl 16) or
+                    (contrastAdjustedGray shl 8) or
+                    contrastAdjustedGray
             }
         }
 
-        return FrameProcessingResult(
-            displayBitmap = displayBitmapFor(
-                imageMode,
-                // The colour output on this path is the source pixels verbatim, so the input
-                // buffer is the colour grid.
-                colorPixels = if (colorEnabled) videoFileInput else null,
-                grayscalePixels = videoFileGrayscale,
-                gridSize = gridSize
-            ),
-            asciiText = if (imageMode) {
-                ""
-            } else {
-                AsciiArt.toAsciiText(videoFileGrayscale.pixelsForPlatformApi, gridSize)
-            },
-            asciiColors = if (imageMode || !colorEnabled) null else videoFileInput.freeze(),
+        return assembleResult(
+            imageMode = imageMode,
+            colorEnabled = colorEnabled,
+            grayscale = videoFileGrayscale,
+            // The colour output on this path is the source pixels verbatim, so the input
+            // buffer is also the colour grid.
+            colour = videoFileInput,
             gridSize = gridSize
         )
     }
+
+    /**
+     * Turns a pipeline's filled buffers into the frame the UI receives. Both pipelines reach
+     * the Display x Colour rules with the same answers, so they live here rather than twice.
+     *
+     * [colour] is read only when Colour is on, so callers may pass a buffer they never
+     * prepared.
+     *
+     * The per-pixel work stays in the callers. Those loops differ on five axes and run
+     * ~972,000 times a second; sharing them would need a per-pixel lambda or interface, the
+     * shape item 13 measured at 4.4 ms per frame.
+     */
+    private fun assembleResult(
+        imageMode: Boolean,
+        colorEnabled: Boolean,
+        grayscale: PixelBuffer,
+        colour: PixelBuffer,
+        gridSize: GridSize
+    ): FrameProcessingResult = FrameProcessingResult(
+        displayBitmap = displayBitmapFor(
+            imageMode,
+            colorPixels = if (colorEnabled) colour else null,
+            grayscalePixels = grayscale,
+            gridSize = gridSize
+        ),
+        asciiText = if (imageMode) {
+            ""
+        } else {
+            AsciiArt.toAsciiText(grayscale.pixelsForPlatformApi, gridSize)
+        },
+        asciiColors = if (imageMode || !colorEnabled) null else colour.freeze(),
+        gridSize = gridSize
+    )
 
     /**
      * The one bitmap a frame still needs: the picture Image mode draws.
