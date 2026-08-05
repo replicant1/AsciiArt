@@ -137,7 +137,7 @@ sequenceDiagram
     else Image Mode
         IP->>IP: Create display bitmap from the colour grid
     end
-    IP-->>CFA: FrameProcessingResult (displayBitmap, asciiText, colorGrid, grid size)
+    IP-->>CFA: FrameProcessingResult (displayBitmap, asciiText, grid size,<br/>plus colorGrid in ASCII mode only)
     CFA->>UI: onFrameProcessed(frame)
     alt Image Mode
         UI->>UI: ImagePreview draws the colour bitmap
@@ -168,12 +168,12 @@ sequenceDiagram
         else Image Mode
             IP->>IP: Create display bitmap (colour grid or grayscale)
         end
-        IP-->>EFL: FrameProcessingResult (displayBitmap, asciiText, colors, grid size)
+        IP-->>EFL: FrameProcessingResult (displayBitmap, asciiText, grid size,<br/>plus colorGrid in ASCII mode only)
         EFL->>UI: onFrameProcessed(frame)
         UI->>UI: Render via ImagePreview or AsciiGridPreview
     end
     Note over EFL: When playback stops the loop suspends<br/>until Player.Listener signals isPlaying
-    UI->>EFL: refreshCurrentFrame() on a display mode change<br/>so a paused video re-renders in the new mode
+    UI->>EFL: refreshCurrentFrame() when the display mode or Colour changes<br/>so a paused video re-renders under the new setting
 ```
 
 ### Shared Parameter Update Flow
@@ -247,6 +247,7 @@ classDiagram
     class ImageProcessor {
         +processLumaFrame()$
         +processBitmap()$
+        -displayBitmapFor()$
         -yuvToArgb()$
     }
 
