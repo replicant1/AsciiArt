@@ -12,8 +12,9 @@ sequenceDiagram
     IP->>IP: Sample U,V planes, convert YUV to ARGB per cell
     IP->>IP: Write colour to its rotated index (luma too, in ASCII mode)
     alt ASCII Mode
-        IP->>AA: toAsciiText(lumaPixels, gridWidth, gridHeight)
+        IP->>AA: toAsciiText(lumaPixels, gridSize)
         AA-->>IP: ASCII text
+        IP->>IP: freeze() the colour buffer — a copy, so the<br/>buffer the next frame overwrites never escapes
     else Image Mode
         IP->>IP: Create display bitmap from the colour grid
     end

@@ -11,7 +11,7 @@ sequenceDiagram
     IP->>IP: Apply contrast adjustment
     IP->>IP: Write each cell to its rotated index
     alt ASCII Mode
-        IP->>AA: toAsciiText(lumaPixels, gridWidth, gridHeight)
+        IP->>AA: toAsciiText(lumaPixels, gridSize)
         AA-->>IP: ASCII text
     else Image Mode
         IP->>IP: Create grayscale ARGB display bitmap

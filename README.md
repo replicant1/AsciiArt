@@ -106,7 +106,7 @@ sequenceDiagram
     IP->>IP: Apply contrast adjustment
     IP->>IP: Write each cell to its rotated index
     alt ASCII Mode
-        IP->>AA: toAsciiText(lumaPixels, gridWidth, gridHeight)
+        IP->>AA: toAsciiText(lumaPixels, gridSize)
         AA-->>IP: ASCII text
     else Image Mode
         IP->>IP: Create grayscale ARGB display bitmap
@@ -132,8 +132,9 @@ sequenceDiagram
     IP->>IP: Sample U,V planes, convert YUV to ARGB per cell
     IP->>IP: Write colour to its rotated index (luma too, in ASCII mode)
     alt ASCII Mode
-        IP->>AA: toAsciiText(lumaPixels, gridWidth, gridHeight)
+        IP->>AA: toAsciiText(lumaPixels, gridSize)
         AA-->>IP: ASCII text
+        IP->>IP: freeze() the colour buffer — a copy, so the<br/>buffer the next frame overwrites never escapes
     else Image Mode
         IP->>IP: Create display bitmap from the colour grid
     end
@@ -163,8 +164,9 @@ sequenceDiagram
         TV-->>EFL: Bitmap (reused from pool)
         EFL->>IP: processBitmap(bitmap, contrastFactor, colorEnabled, displayMode)
         alt ASCII Mode
-            IP->>AA: toAsciiText(grayscalePixels, width, height)
+            IP->>AA: toAsciiText(grayscalePixels, gridSize)
             AA-->>IP: ASCII text
+            IP->>IP: freeze() the colour buffer (a copy)
         else Image Mode
             IP->>IP: Create display bitmap (colour grid or grayscale)
         end
@@ -262,13 +264,32 @@ classDiagram
     class FrameProcessingResult {
         displayBitmap: Bitmap?
         asciiText: String
-        asciiColors: IntArray?
-        gridWidth: Int
-        gridHeight: Int
+        asciiColors: PixelGrid?
+        gridSize: GridSize
+    }
+
+    class GridSize {
+        width: Int
+        height: Int
+        cellCount: Int
+    }
+
+    class PixelGrid {
+        <<immutable>>
+        size: GridSize
+        +get(x, y)
+        +getOrNull(x, y)
+    }
+
+    class PixelBuffer {
+        size: GridSize
+        +prepare(size)
+        +freeze() PixelGrid
+        +pixelsForPlatformApi: IntArray
     }
 
     class AsciiArt {
-        +toAsciiText(grayscalePixels, width, height)$
+        +toAsciiText(grayscalePixels, size)$
         -glyphForIntensity: CharArray
         -buildSortedCharset()$
     }
@@ -291,6 +312,12 @@ classDiagram
     ImageProcessor --> RotationMap
     ImageProcessor --> FrameProcessingResult
     ImageProcessor --> AsciiArt
+    ImageProcessor --> PixelBuffer
+    PixelBuffer ..> PixelGrid : freeze() copies
+    PixelBuffer --> GridSize
+    PixelGrid --> GridSize
+    FrameProcessingResult --> PixelGrid
+    FrameProcessingResult --> GridSize
 ```
 
 | Class | Description |
@@ -299,9 +326,12 @@ classDiagram
 | `AsciiPreviewScreen` | Root composable screen. Owns all shared UI state — scale factor, contrast, colour toggle, display mode and selected tab — and renders the control panel plus the tab selector. |
 | `CameraAnalysisPipeline` | Private composable that wires up CameraX `ImageAnalysis`, binds it to the `LifecycleOwner`, and forwards each raw camera frame to a `CameraFrameAnalyzer` instance. |
 | `CameraFrameAnalyzer` | Implements `ImageAnalysis.Analyzer`. Receives raw YUV `ImageProxy` frames from CameraX, passes the sensor rotation and the current display mode through to `ImageProcessor` (which applies the rotation while downsampling), and posts the finished `FrameProcessingResult` to the UI thread. |
-| `ImageProcessor` | Singleton. Downsamples luma data from a YUV `ImageProxy` or an existing `Bitmap`, applies contrast adjustment, and produces exactly what the current display mode draws — see `FrameProcessingResult`. Applies rotation inside the downsample loop via `RotationMap`. Keeps pre-allocated `IntArray` buffers for the data it consumes internally; arrays that escape to Compose state are allocated per frame. |
+| `ImageProcessor` | Singleton. Downsamples luma data from a YUV `ImageProxy` or an existing `Bitmap`, applies contrast adjustment, and produces exactly what the current display mode draws — see `FrameProcessingResult`. Applies rotation inside the downsample loop via `RotationMap`. Writes into four `PixelBuffer`s it owns, two per pipeline; anything the UI keeps leaves through `freeze()`. |
 | `RotationMap` | A right-angle rotation expressed as an affine index map — `dstIndex = base + stepX * x + stepY * y` — so the downsample loop can write each cell directly to its rotated position. Pure arithmetic with no Android dependency, which is what makes it unit-testable. |
-| `FrameProcessingResult` | Immutable data class that carries the output of a single `ImageProcessor` call: the de-res grid dimensions, the ASCII text for ASCII mode, an optional `IntArray` of per-cell ARGB colours, and the `Bitmap` Image mode draws — null in ASCII mode, which draws no image. Building only what the mode shows is what keeps a full-size bitmap from being allocated and filled on every frame regardless of whether anything reads it. |
+| `FrameProcessingResult` | Immutable data class that carries the output of a single `ImageProcessor` call: the `GridSize`, the ASCII text for ASCII mode, an optional `PixelGrid` of per-cell ARGB colours, and the `Bitmap` Image mode draws — null in ASCII mode, which draws no image. Building only what the mode shows is what keeps a full-size bitmap from being allocated and filled on every frame regardless of whether anything reads it. |
+| `GridSize` | The dimensions of a de-res grid, in cells. Carried separately from the pixels because it outlives them: with Colour off there is no colour grid, and the UI still has to lay out cells. |
+| `PixelGrid` | An immutable grid of ARGB pixels — the only pixel type that may cross to the main thread and be held in Compose state. Its array is private and its constructor internal, so the sole way to obtain one is `PixelBuffer.freeze()`, which copies. |
+| `PixelBuffer` | A reusable pixel buffer owned by `ImageProcessor` and overwritten by every frame. Grown, never shrunk, so it can be longer than the current grid. Passing one to a function that reads and returns is safe; anything that outlives the call must go through `freeze()` first. Splitting these two types apart is what makes the mistake behind item 4 — a reused buffer escaping to Compose state — a type error rather than a race. |
 | `AsciiArt` | Singleton. Converts a grid of grayscale pixels to a multi-line ASCII `String` by mapping each pixel's intensity to a character from a density-sorted printable ASCII set — brighter cells map to denser glyphs. The mapping is precomputed into a `CharArray(256)` on first use, so the per-pixel cost is one array read. |
 | `AsciiDisplayMode` | Enum with two values — `IMAGE` (render de-res bitmap cells) and `ASCII` (render character glyphs) — shared across both tabs. |
 | `ExoPlayerVideoFileTab` | Composable for the Video File tab. Creates and manages the `ExoPlayer` instance and its lifecycle. Provides a persistent control bar (Load, Restart, Play, Pause) visible in both modes. Delegates frame capture to `ExoPlayerFrameListener` and renders the output through `ImagePreview` or `AsciiGridPreview`. |
