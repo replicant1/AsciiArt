@@ -432,6 +432,11 @@ fun ImagePreview(
  * take the grayscale `Bitmap` and read `.width`/`.height` off it — never a pixel — which
  * read as if the image were being drawn here and kept a full-size bitmap alive per frame
  * to carry two numbers.
+ *
+ * [gridSize] is passed even though [asciiColors] carries its own, because with Colour off
+ * there is no colour grid and no other source of the dimensions. When both are here they are
+ * the same object — [com.rodbailey.asciiart.processing.ImageProcessor] builds them from one
+ * value — but nothing in the type system says so, hence the check below.
  */
 @Composable
 fun AsciiGridPreview(
@@ -441,6 +446,13 @@ fun AsciiGridPreview(
     colorEnabled: Boolean,
     modifier: Modifier,
 ) {
+    // A colour grid of the wrong shape would tint every glyph from the wrong cell — a
+    // plausible-looking image rather than an obvious failure, and silent. One comparison per
+    // recomposition buys an immediate crash instead.
+    require(asciiColors == null || asciiColors.size == gridSize) {
+        "colour grid ${asciiColors?.size} does not match the glyph grid $gridSize"
+    }
+
     val (gridWidth, gridHeight) = gridSize
     // AsciiArt.toAsciiText emits exactly gridWidth characters per row, separated by
     // '\n', so row y starts at y * (gridWidth + 1). Row bounds are pure arithmetic —
