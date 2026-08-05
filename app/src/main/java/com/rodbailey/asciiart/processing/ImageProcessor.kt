@@ -168,13 +168,13 @@ object ImageProcessor {
                 val lumaIndex = rowOffset + (sourceX * pixelStride)
                 val gray = lumaBuffer.get(lumaIndex).toInt() and 0xFF
                 val contrastedGray = (((gray - 128f) * contrast) + 128f).coerceIn(0f, 255f)
-                val contrastAdjustedGray = contrastedGray.roundToInt().coerceIn(0, 255)
+                val contrastedGrayInt = contrastedGray.roundToInt().coerceIn(0, 255)
                 val outIndex = rotatedRowBase + (rotation.stepX * x)
                 if (grayscaleNeeded) {
                     liveCameraGrayscale[outIndex] = (0xFF shl 24) or
-                        (contrastAdjustedGray shl 16) or
-                        (contrastAdjustedGray shl 8) or
-                        contrastAdjustedGray
+                        (contrastedGrayInt shl 16) or
+                        (contrastedGrayInt shl 8) or
+                        contrastedGrayInt
                 }
 
                 if (colorEnabled) {
@@ -189,7 +189,7 @@ object ImageProcessor {
                     // where the displayed pixels come from this array alone. Chroma (U, V)
                     // is deliberately untouched, so contrast changes brightness separation
                     // without shifting hue or saturation.
-                    liveCameraColor[outIndex] = yuvToArgb(contrastAdjustedGray, uValue, vValue)
+                    liveCameraColor[outIndex] = yuvToArgb(contrastedGrayInt, uValue, vValue)
                 }
             }
         }
