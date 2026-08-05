@@ -51,19 +51,23 @@ object AsciiArt {
      * in. Taking the pixels directly removes both copies, and with nothing else reading the
      * bitmap, ASCII mode no longer needs one at all.
      *
+     * Takes the raw pixels rather than a [PixelGrid]: this reads them and returns, retaining
+     * nothing, so there is no ownership to protect. That is why [ImageProcessor] can pass its
+     * live scratch buffer straight in without freezing it first.
+     *
      * @param grayscalePixels Row-major ARGB pixels of a small de-res grid, e.g. 32x18. May be
-     *   longer than `width * height` — the callers pass reusable buffers that are only ever
-     *   grown — in which case the tail is ignored.
-     * @param width Grid width in cells
-     * @param height Grid height in cells
-     * @return A multi-line ASCII string with [width] glyphs on each of [height] rows
+     *   longer than [GridSize.cellCount] — the callers pass reusable buffers that are only
+     *   ever grown — in which case the tail is ignored.
+     * @param size Grid dimensions in cells
+     * @return A multi-line ASCII string, one glyph per cell
      */
-    fun toAsciiText(grayscalePixels: IntArray, width: Int, height: Int): String {
+    fun toAsciiText(grayscalePixels: IntArray, size: GridSize): String {
         val glyphs = glyphForIntensity
         if (glyphs.isEmpty()) {
             return ""
         }
 
+        val (width, height) = size
         val textBuilder = StringBuilder((width + 1) * height)
 
         for (y in 0 until height) {

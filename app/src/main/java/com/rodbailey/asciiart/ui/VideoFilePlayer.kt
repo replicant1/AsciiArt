@@ -257,8 +257,7 @@ fun ExoPlayerVideoFileTab(
                     )
                 } else if (frame != null && displayMode == AsciiDisplayMode.ASCII) {
                     AsciiGridPreview(
-                        gridWidth = frame.gridWidth,
-                        gridHeight = frame.gridHeight,
+                        gridSize = frame.gridSize,
                         asciiText = frame.asciiText,
                         asciiColors = frame.asciiColors,
                         colorEnabled = colorEnabled,
